@@ -1,0 +1,1133 @@
+version: 1
+updated: "2026-04-28"
+status: "architecture-contract"
+
+architecture:
+  framework: "LangGraph"
+  tools_protocol: "MCP"
+  agent_coordination: "SharedState / Blackboard"
+  persistent_memory: "PersistentMemory / MemoryStore"
+  memory_access: "Memory MCP Server / deterministic tool layer"
+  context_retrieval_agent: "MemoryContextAgent / lightweight retriever"
+  future_agent_protocol: "A2A optional, not MVP dependency"
+  language: "es-AR/rioplatense"
+
+model_profiles:
+  strategic:
+    description: "Razonamiento complejo, arquitectura, decisiones de alto impacto."
+    preferred: "GLM 5.1 via Z.AI"
+    fallback: "Kimi K2.6 via Moonshot"
+  heavy_coding:
+    description: "Implementación, refactors, lectura de código pesada."
+    preferred: "Kimi K2.6 via Moonshot"
+    fallback: "GLM 5.1 via Z.AI"
+  balanced:
+    description: "Tareas técnicas medianas, revisión, documentación."
+    preferred: "Kimi K2.6 via Moonshot"
+    fallback: "local/free compatible model"
+  economy:
+    description: "Tareas repetitivas, extracción, clasificación, búsquedas."
+    preferred: "cheap/local model"
+    fallback: "balanced"
+
+skill_loading_policy:
+  default_mode: "lazy"
+  max_full_skills_per_agent_run: 5
+  metadata_always_available: true
+  full_content_loaded_when:
+    - "skill is in base_skills.required"
+    - "manual assignment has priority required"
+    - "workflow phase requires it"
+    - "high-confidence trigger matches current task"
+    - "agent explicitly requests it and allowlist permits it"
+  never_load_all_skills: true
+
+mcp_capability_groups:
+  filesystem_read:
+    - "mcp_filesystem_read_text_file"
+    - "mcp_filesystem_list_directory"
+    - "mcp_filesystem_search_files"
+  filesystem_write:
+    - "mcp_filesystem_write_file"
+    - "mcp_filesystem_edit_file"
+    - "mcp_filesystem_create_directory"
+  github_read:
+    - "mcp_github_get_file_contents"
+    - "mcp_github_list_pull_requests"
+    - "mcp_github_get_pull_request"
+    - "mcp_github_get_pull_request_files"
+  github_write:
+    - "mcp_github_create_branch"
+    - "mcp_github_create_pull_request"
+    - "mcp_github_push_files"
+    - "mcp_github_create_or_update_file"
+  shell_readonly:
+    - "terminal_readonly_commands"
+  shell_execute:
+    - "terminal_safe_execute"
+  web_research:
+    - "web_search"
+    - "web_extract"
+  browser:
+    - "browser_navigate"
+    - "browser_snapshot"
+    - "browser_click"
+    - "browser_type"
+  memory:
+    - "obsidian_vault"
+    - "fact_store"
+    - "session_search"
+    - "memory_search"
+    - "memory_get_item"
+    - "memory_get_tree"
+    - "memory_build_pack"
+    - "memory_add_candidate"
+    - "memory_list_candidates"
+    - "memory_commit_candidate"
+    - "memory_reject_candidate"
+    - "memory_link_items"
+    - "memory_forget"
+    - "memory_export_obsidian"
+
+workflow_phases:
+  - id: "memory_rehydration"
+    owner: "MemoryContextAgent"
+    gate: false
+    approval: "none"
+  - id: "intake"
+    owner: "HermesOrchestrator"
+    gate: false
+  - id: "discovery"
+    owner: "BusinessAnalyst"
+    gate: true
+    approval: "user_confirms_problem_context"
+  - id: "prd"
+    owner: "ProductManager"
+    gate: true
+    approval: "user_approves_prd"
+  - id: "technical_planning"
+    owner: "CodeOrchestrator"
+    parallel_agents:
+      - "Planner"
+      - "CodebaseExplorer"
+      - "Architect"
+      - "SystemDesigner"
+  - id: "spec_consolidation"
+    owner: "CodeOrchestrator"
+    gate: true
+    approval: "user_approves_spec_when_required"
+  - id: "tdd"
+    owner: "Tester"
+    gate: true
+    approval: "test_plan_exists"
+  - id: "implementation"
+    owner: "CodeOrchestrator"
+    parallel_agents:
+      - "BackendImplementer"
+      - "FrontendImplementer"
+    continuous_review_agent: "SystemDesigner"
+  - id: "contract_alignment"
+    owner: "ContractAligner"
+    gate: true
+    approval: "contracts_match"
+  - id: "review"
+    owner: "CodeOrchestrator"
+    parallel_agents:
+      - "Reviewer"
+      - "SecurityReviewer"
+      - "Tester"
+  - id: "qa_docs"
+    owner: "CodeOrchestrator"
+    parallel_agents:
+      - "QAGatekeeper"
+      - "DependencyChecker"
+      - "TechnicalWriter"
+  - id: "release"
+    owner: "ReleaseManager"
+    gate: true
+    approval: "user_approves_release_or_pr"
+  - id: "deploy"
+    owner: "Builder"
+    gate: true
+    approval: "user_approves_deploy"
+  - id: "memory_consolidation"
+    owner: "MemoryManager"
+    gate: false
+    approval: "policy_or_user_for_sensitive_conflicts"
+
+agents:
+  HermesOrchestrator:
+    layer: 0
+    domain: "core"
+    model_profile: "strategic"
+    role: "Punto de contacto único con el usuario y coordinador superior."
+    responsibilities:
+      - "Entender intención inicial."
+      - "Crear run_id y project_id."
+      - "Seleccionar domain orchestrator."
+      - "Presentar preguntas generadas por agentes internos."
+      - "Pedir aprobaciones de gates."
+      - "Presentar resultados finales."
+    restrictions:
+      - "No escribe código."
+      - "No hace research técnico profundo."
+      - "No ejecuta deploy."
+      - "No saltea gates."
+    human_interaction: "allowed_direct"
+    reads:
+      - "all_canonical_artifacts"
+      - "all_gate_statuses"
+    writes:
+      - "orchestrator_slot"
+      - "human_messages"
+      - "approvals"
+    base_skills:
+      required:
+        - "plan"
+        - "writing-plans"
+        - "subagent-driven-development"
+        - "obsidian"
+      optional: []
+    dynamic_skill_policy:
+      allowed_tags:
+        - "planning"
+        - "workflow"
+        - "orchestration"
+        - "note-taking"
+      denied_tags:
+        - "code-execution"
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "memory"
+
+  CodeOrchestrator:
+    layer: 1
+    domain: "code"
+    model_profile: "strategic"
+    role: "Engineering lead del dominio Code. Coordina el workflow técnico completo."
+    responsibilities:
+      - "Activar agentes del dominio Code."
+      - "Coordinar fan-out/fan-in."
+      - "Consolidar specs y artefactos canónicos."
+      - "Aplicar gates PRD, TDD, QA y release."
+      - "Resolver conflictos entre slots."
+    restrictions:
+      - "No habla directamente con el usuario."
+      - "No implementa código."
+      - "No modifica PRD sin aprobación."
+    human_interaction: "via_HermesOrchestrator"
+    reads:
+      - "discovery"
+      - "prd"
+      - "all_agent_slots"
+    writes:
+      - "code_orchestrator_slot"
+      - "spec"
+      - "task_graph"
+      - "design"
+      - "gate_statuses"
+    base_skills:
+      required:
+        - "test-driven-development"
+        - "writing-plans"
+        - "codebase-inspection"
+        - "systematic-debugging"
+      optional:
+        - "github-pr-workflow"
+        - "architecture-diagram"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "software-development"
+        - "testing"
+        - "debugging"
+        - "github"
+        - "architecture"
+      denied_tags:
+        - "marketing"
+        - "music"
+        - "gaming"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "filesystem_write"
+      - "github_read"
+      - "memory"
+
+  BusinessAnalyst:
+    layer: 2
+    domain: "code"
+    phase: "discovery"
+    model_profile: "strategic"
+    role: "Analista funcional. Entiende el problema antes de que exista solución."
+    responsibilities:
+      - "Analizar el pedido inicial."
+      - "Detectar ambigüedades, restricciones y riesgos."
+      - "Generar preguntas de clarificación para el usuario."
+      - "Documentar contexto, actores, necesidades y out-of-scope inicial."
+    restrictions:
+      - "No define arquitectura técnica."
+      - "No escribe PRD final."
+      - "No codea."
+      - "No pregunta directamente: propone preguntas a HermesOrchestrator."
+    human_interaction: "via_HermesOrchestrator"
+    reads:
+      - "intake"
+      - "existing_project_context"
+    writes:
+      - "business_analyst_slot"
+      - "discovery_draft"
+      - "clarification_questions"
+    base_skills:
+      required:
+        - "plan"
+        - "writing-plans"
+        - "obsidian"
+      optional: []
+    dynamic_skill_policy:
+      allowed_tags:
+        - "research"
+        - "business"
+        - "requirements"
+        - "note-taking"
+      denied_tags:
+        - "code-execution"
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "memory"
+      - "web_research"
+
+  ProductManager:
+    layer: 2
+    domain: "code"
+    phase: "prd"
+    model_profile: "strategic"
+    role: "Product owner operativo. Convierte discovery en PRD accionable."
+    responsibilities:
+      - "Redactar PRD."
+      - "Definir objetivos, features, criterios de aceptación y out-of-scope."
+      - "Separar must/should/nice-to-have."
+      - "Preparar el PRD para aprobación humana."
+    restrictions:
+      - "No decide stack técnico."
+      - "No implementa."
+      - "No cambia criterios aprobados sin gate."
+    human_interaction: "via_HermesOrchestrator"
+    reads:
+      - "discovery"
+      - "business_analyst_slot"
+    writes:
+      - "product_manager_slot"
+      - "prd_draft"
+    base_skills:
+      required:
+        - "writing-plans"
+        - "obsidian"
+      optional: []
+    dynamic_skill_policy:
+      allowed_tags:
+        - "product"
+        - "business"
+        - "requirements"
+        - "documentation"
+      denied_tags:
+        - "code-execution"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "filesystem_write"
+      - "memory"
+
+  Planner:
+    layer: 2
+    domain: "code"
+    phase: "technical_planning"
+    model_profile: "strategic"
+    role: "Planificador técnico. Convierte PRD en task graph ejecutable."
+    responsibilities:
+      - "Descomponer features en tareas atómicas."
+      - "Definir dependencias."
+      - "Estimar esfuerzo."
+      - "Identificar qué agente ejecuta cada tarea."
+    restrictions:
+      - "No modifica código."
+      - "No decide UI visual."
+      - "No escribe tests."
+    human_interaction: "none"
+    reads:
+      - "prd"
+      - "codebase_map_if_available"
+    writes:
+      - "planner_slot"
+      - "task_graph_draft"
+    base_skills:
+      required:
+        - "writing-plans"
+        - "codebase-inspection"
+      optional:
+        - "obsidian"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "planning"
+        - "software-development"
+        - "architecture"
+      denied_tags:
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "github_read"
+
+  CodebaseExplorer:
+    layer: 2
+    domain: "code"
+    phase: "technical_planning"
+    model_profile: "heavy_coding"
+    role: "Explorador de codebase. Mapea el repo sin modificarlo."
+    responsibilities:
+      - "Inspeccionar estructura del repo."
+      - "Encontrar patrones existentes."
+      - "Identificar archivos candidatos a tocar."
+      - "Detectar comandos de test/build/lint."
+    restrictions:
+      - "Readonly."
+      - "No escribe código."
+      - "No refactoriza."
+    human_interaction: "none"
+    reads:
+      - "repo_files"
+      - "prd"
+    writes:
+      - "codebase_explorer_slot"
+      - "codebase_map"
+    base_skills:
+      required:
+        - "codebase-inspection"
+        - "github-repo-management"
+      optional: []
+    dynamic_skill_policy:
+      allowed_tags:
+        - "codebase"
+        - "github"
+        - "debugging"
+      denied_tags:
+        - "filesystem-write"
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "github_read"
+      - "shell_readonly"
+
+  Architect:
+    layer: 2
+    domain: "code"
+    phase: "technical_planning"
+    model_profile: "strategic"
+    role: "Arquitecto técnico backend/API/datos."
+    responsibilities:
+      - "Diseñar módulos, servicios, APIs y modelo de datos."
+      - "Elegir patrones técnicos."
+      - "Definir boundaries y contratos backend."
+      - "Producir ADRs cuando haya decisiones relevantes."
+    restrictions:
+      - "No implementa."
+      - "No diseña UI visual."
+      - "No cambia PRD."
+    human_interaction: "none"
+    reads:
+      - "prd"
+      - "codebase_map"
+      - "planner_slot"
+    writes:
+      - "architect_slot"
+      - "backend_design_draft"
+      - "api_contract_draft"
+    base_skills:
+      required:
+        - "architecture-diagram"
+        - "design-md"
+        - "codebase-inspection"
+      optional:
+        - "excalidraw"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "architecture"
+        - "api"
+        - "database"
+        - "backend"
+      denied_tags:
+        - "frontend-only"
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "filesystem_write"
+
+  SystemDesigner:
+    layer: 2
+    domain: "code"
+    phase: "design_and_frontend_review"
+    model_profile: "strategic"
+    role: "Diseñador de sistema UI/UX y guardián del design system."
+    responsibilities:
+      - "Crear y mantener design-system.json."
+      - "Definir tokens, componentes, layouts, patrones UX y reglas de accesibilidad."
+      - "Validar cada componente/pantalla del frontend."
+      - "Comunicar feedback continuo a FrontendImplementer vía shared state."
+    restrictions:
+      - "No implementa código de producción."
+      - "No decide backend."
+      - "No permite componentes fuera del design system sin registrar excepción."
+    human_interaction: "none_or_via_Hermes_for_visual_decisions"
+    reads:
+      - "prd"
+      - "codebase_map"
+      - "frontend_slot"
+      - "existing_design_system"
+    writes:
+      - "system_designer_slot"
+      - "design_system"
+      - "design_reviews"
+    base_skills:
+      required:
+        - "frontend-design"
+        - "popular-web-designs"
+        - "design-md"
+      optional:
+        - "excalidraw"
+        - "claude-design"
+        - "architecture-diagram"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "frontend"
+        - "ui"
+        - "ux"
+        - "design-system"
+        - "accessibility"
+        - "animation"
+      denied_tags:
+        - "backend"
+        - "database"
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "filesystem_write"
+      - "browser"
+
+  Tester:
+    layer: 2
+    domain: "code"
+    phase: "tdd_and_test_execution"
+    model_profile: "balanced"
+    role: "Especialista TDD y ejecución de pruebas."
+    responsibilities:
+      - "Escribir test plan antes de código."
+      - "Definir unit, integration, e2e y contract tests."
+      - "Ejecutar tests durante review."
+      - "Reportar fallos con reproducción."
+    restrictions:
+      - "No escribe código de producción."
+      - "No cambia PRD/spec para hacer pasar tests."
+    human_interaction: "none"
+    reads:
+      - "prd"
+      - "spec"
+      - "design"
+      - "implementation_slots"
+    writes:
+      - "tester_slot"
+      - "test_plan"
+      - "test_results"
+    base_skills:
+      required:
+        - "test-driven-development"
+        - "systematic-debugging"
+      optional: []
+    dynamic_skill_policy:
+      allowed_tags:
+        - "testing"
+        - "debugging"
+        - "e2e"
+        - "performance"
+      denied_tags:
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "filesystem_write"
+      - "shell_execute"
+
+  BackendImplementer:
+    layer: 2
+    domain: "code"
+    phase: "implementation"
+    model_profile: "heavy_coding"
+    role: "Desarrollador backend. Implementa APIs, DB y lógica de negocio."
+    responsibilities:
+      - "Implementar backend siguiendo spec y tests."
+      - "Crear/actualizar endpoints, servicios, repositorios, migraciones."
+      - "Mantener contratos claros para frontend."
+      - "Registrar decisiones no obvias."
+    restrictions:
+      - "No toca frontend salvo contratos/tipos compartidos aprobados."
+      - "No modifica PRD/spec."
+      - "No saltea tests."
+    human_interaction: "none"
+    reads:
+      - "spec"
+      - "backend_design"
+      - "test_plan"
+      - "codebase_map"
+    writes:
+      - "backend_implementer_slot"
+      - "backend_code_changes"
+      - "api_contract_actual"
+    base_skills:
+      required:
+        - "opencode"
+        - "node-inspect-debugger"
+        - "python-debugpy"
+        - "test-driven-development"
+      optional:
+        - "github-pr-workflow"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "backend"
+        - "node"
+        - "python"
+        - "database"
+        - "api"
+        - "debugging"
+      denied_tags:
+        - "ui"
+        - "marketing"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "filesystem_write"
+      - "shell_execute"
+      - "github_read"
+
+  FrontendImplementer:
+    layer: 2
+    domain: "code"
+    phase: "implementation"
+    model_profile: "heavy_coding"
+    role: "Desarrollador frontend. Implementa UI respetando design-system.json."
+    responsibilities:
+      - "Implementar componentes, páginas, hooks y estado frontend."
+      - "Consultar design-system.json antes de crear UI."
+      - "Pedir revisión a SystemDesigner por cada componente/pantalla importante."
+      - "Consumir APIs respetando contratos."
+    restrictions:
+      - "No inventa estilos fuera del design system."
+      - "No toca backend salvo tipos compartidos aprobados."
+      - "No modifica PRD/spec."
+    human_interaction: "none"
+    reads:
+      - "spec"
+      - "design_system"
+      - "frontend_design"
+      - "api_contract_draft"
+      - "test_plan"
+    writes:
+      - "frontend_implementer_slot"
+      - "frontend_code_changes"
+      - "frontend_api_usage"
+    base_skills:
+      required:
+        - "opencode"
+        - "frontend-design"
+        - "node-inspect-debugger"
+      optional:
+        - "claude-design"
+        - "test-driven-development"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "frontend"
+        - "react"
+        - "typescript"
+        - "ui"
+        - "accessibility"
+        - "animation"
+      denied_tags:
+        - "backend-only"
+        - "database"
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "filesystem_write"
+      - "shell_execute"
+      - "browser"
+
+  ContractAligner:
+    layer: 2
+    domain: "code"
+    phase: "contract_alignment"
+    model_profile: "balanced"
+    role: "Verificador de contratos frontend-backend."
+    responsibilities:
+      - "Comparar endpoints reales vs esperados."
+      - "Comparar DTOs/schemas/types vs uso frontend."
+      - "Detectar incompatibilidades y breaking changes."
+      - "Generar contract-report.md."
+    restrictions:
+      - "No codea."
+      - "No arregla contratos, solo reporta y propone."
+    human_interaction: "none"
+    reads:
+      - "api_contract_actual"
+      - "frontend_api_usage"
+      - "spec"
+      - "test_plan"
+    writes:
+      - "contract_aligner_slot"
+      - "contract_report"
+    base_skills:
+      required:
+        - "codebase-inspection"
+      optional:
+        - "test-driven-development"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "api"
+        - "contract"
+        - "typescript"
+        - "openapi"
+      denied_tags:
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "shell_readonly"
+
+  Reviewer:
+    layer: 2
+    domain: "code"
+    phase: "review"
+    model_profile: "balanced"
+    role: "Revisor de código general."
+    responsibilities:
+      - "Revisar calidad, legibilidad y coherencia con spec."
+      - "Detectar bugs, deuda técnica, duplicación y mala arquitectura."
+      - "Generar comentarios accionables."
+    restrictions:
+      - "No corrige directamente salvo instrucción explícita del orquestador."
+      - "No revisa seguridad profunda, eso es SecurityReviewer."
+    human_interaction: "none"
+    reads:
+      - "implementation_slots"
+      - "spec"
+      - "design"
+      - "test_results"
+    writes:
+      - "reviewer_slot"
+      - "code_review_report"
+    base_skills:
+      required:
+        - "github-code-review"
+        - "requesting-code-review"
+      optional:
+        - "codebase-inspection"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "review"
+        - "quality"
+        - "github"
+        - "software-development"
+      denied_tags:
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "github_read"
+
+  SecurityReviewer:
+    layer: 2
+    domain: "code"
+    phase: "review"
+    model_profile: "balanced"
+    role: "Revisor de seguridad."
+    responsibilities:
+      - "Buscar secrets, vulnerabilidades y riesgos OWASP."
+      - "Validar auth, inputs, permisos y manejo de errores."
+      - "Generar security-report.md."
+    restrictions:
+      - "No revisa estilo general."
+      - "No deploya."
+      - "No ignora hallazgos críticos."
+    human_interaction: "none"
+    reads:
+      - "implementation_slots"
+      - "spec"
+      - "dependencies"
+    writes:
+      - "security_reviewer_slot"
+      - "security_report"
+    base_skills:
+      required:
+        - "requesting-code-review"
+      optional:
+        - "systematic-debugging"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "security"
+        - "owasp"
+        - "secrets"
+        - "dependency-scan"
+      denied_tags:
+        - "marketing"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "shell_readonly"
+      - "github_read"
+
+  QAGatekeeper:
+    layer: 2
+    domain: "code"
+    phase: "qa_docs"
+    model_profile: "strategic"
+    role: "Gate final de calidad contra PRD, spec, tests y design system."
+    responsibilities:
+      - "Verificar que el resultado cumple PRD."
+      - "Verificar que cumple spec y test plan."
+      - "Verificar que UI cumple design system."
+      - "Bloquear release si hay incumplimientos críticos."
+    restrictions:
+      - "No codea."
+      - "No negocia scope sin aprobación humana."
+    human_interaction: "via_HermesOrchestrator_for_gate_result"
+    reads:
+      - "prd"
+      - "spec"
+      - "design_system"
+      - "test_results"
+      - "reviews"
+      - "contract_report"
+    writes:
+      - "qa_gatekeeper_slot"
+      - "qa_report"
+      - "gate_statuses"
+    base_skills:
+      required:
+        - "systematic-debugging"
+        - "codebase-inspection"
+      optional:
+        - "test-driven-development"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "qa"
+        - "testing"
+        - "quality"
+        - "requirements"
+      denied_tags:
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "shell_readonly"
+
+  DependencyChecker:
+    layer: 2
+    domain: "code"
+    phase: "qa_docs"
+    model_profile: "balanced"
+    role: "Verificador de impacto y compatibilidad."
+    responsibilities:
+      - "Detectar breaking changes."
+      - "Revisar dependencias modificadas."
+      - "Identificar impacto en módulos no tocados."
+      - "Generar dependency-impact-report.md."
+    restrictions:
+      - "No actualiza dependencias sin instrucción explícita."
+      - "No codea."
+    human_interaction: "none"
+    reads:
+      - "diff"
+      - "package_files"
+      - "lockfiles"
+      - "codebase_map"
+    writes:
+      - "dependency_checker_slot"
+      - "dependency_impact_report"
+    base_skills:
+      required:
+        - "github-pr-workflow"
+        - "codebase-inspection"
+      optional: []
+    dynamic_skill_policy:
+      allowed_tags:
+        - "dependencies"
+        - "github"
+        - "compatibility"
+        - "monorepo"
+      denied_tags:
+        - "ui"
+        - "marketing"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "shell_readonly"
+      - "github_read"
+
+  TechnicalWriter:
+    layer: 2
+    domain: "code"
+    phase: "qa_docs"
+    model_profile: "balanced"
+    role: "Documentador técnico y generador de artefactos entregables."
+    responsibilities:
+      - "Generar README, CHANGELOG, guías de uso y notas técnicas."
+      - "Generar PDFs cuando el flujo lo requiera."
+      - "Actualizar documentación del proyecto."
+      - "Guardar conocimiento relevante en Obsidian/fact store si corresponde."
+    restrictions:
+      - "No codea."
+      - "No cambia comportamiento del sistema."
+    human_interaction: "none"
+    reads:
+      - "prd"
+      - "spec"
+      - "qa_report"
+      - "release_notes_draft"
+    writes:
+      - "technical_writer_slot"
+      - "docs"
+      - "pdf_artifacts"
+    base_skills:
+      required:
+        - "obsidian"
+        - "powerpoint"
+        - "nano-pdf"
+      optional:
+        - "ocr-and-documents"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "documentation"
+        - "pdf"
+        - "presentation"
+        - "note-taking"
+      denied_tags:
+        - "code-execution"
+        - "deploy"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "filesystem_write"
+      - "memory"
+
+  ReleaseManager:
+    layer: 2
+    domain: "code"
+    phase: "release"
+    model_profile: "balanced"
+    role: "Responsable de branch, PR, release notes y versionado."
+    responsibilities:
+      - "Preparar branch/commits/PR."
+      - "Generar descripción del PR y checklist."
+      - "Gestionar semver y release notes."
+      - "Solicitar aprobación antes de merge/deploy."
+    restrictions:
+      - "No implementa features."
+      - "No mergea sin aprobación explícita."
+      - "No deploya, eso es Builder."
+    human_interaction: "via_HermesOrchestrator_for_approval"
+    reads:
+      - "qa_report"
+      - "dependency_impact_report"
+      - "docs"
+      - "diff"
+    writes:
+      - "release_manager_slot"
+      - "pull_request"
+      - "release_notes"
+    base_skills:
+      required:
+        - "github-pr-workflow"
+        - "github-issues"
+      optional:
+        - "github-code-review"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "github"
+        - "release"
+        - "versioning"
+      denied_tags:
+        - "frontend"
+        - "backend"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "github_read"
+      - "github_write"
+      - "shell_readonly"
+
+  Builder:
+    layer: 2
+    domain: "code"
+    phase: "deploy"
+    model_profile: "balanced"
+    role: "DevOps builder/deployer. Ejecuta deploys y verificaciones operativas."
+    responsibilities:
+      - "Construir y desplegar según estrategia aprobada."
+      - "Exponer entornos locales si corresponde."
+      - "Verificar health checks."
+      - "Reportar URL/status final."
+    restrictions:
+      - "No deploya sin aprobación."
+      - "No cambia código de features."
+      - "No ignora security/QA gates."
+    human_interaction: "via_HermesOrchestrator_for_deploy_approval"
+    reads:
+      - "release_notes"
+      - "qa_report"
+      - "deploy_config"
+    writes:
+      - "builder_slot"
+      - "deploy_status"
+    base_skills:
+      required:
+        - "cloudflare-tunnel-local-dev"
+        - "levantar-app"
+        - "hermes-gateway-background-wsl"
+      optional:
+        - "webhook-subscriptions"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "devops"
+        - "deploy"
+        - "cloudflare"
+        - "docker"
+        - "ci-cd"
+      denied_tags:
+        - "product"
+        - "ui-design"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "shell_execute"
+      - "github_read"
+
+  MemoryContextAgent:
+    layer: 0
+    domain: "core"
+    cross_cutting: true
+    phase: "memory_rehydration"
+    model_profile: "economy"
+    role: "Agente liviano de recuperación de contexto: busca memoria relevante vía Memory MCP y arma memory packs pequeños por agente."
+    responsibilities:
+      - "Detectar proyecto, feature, fase y agentes involucrados a partir del TaskContext."
+      - "Consultar memoria mediante Memory MCP/tool layer, nunca vía SQLite directo."
+      - "Rankear resultados por relevancia, vigencia, confianza, importancia y rol."
+      - "Construir memory packs por agente respetando budget de contexto."
+      - "Incluir fuentes/provenance y razón de inclusión en cada memory pack."
+      - "Escribir memory_context.by_agent en SharedState antes de activar especialistas."
+    restrictions:
+      - "No habla directamente con el usuario."
+      - "No escribe código ni modifica artifacts canónicos."
+      - "No guarda memoria canónica ni commitea candidatos."
+      - "No consulta SQLite directo."
+      - "No carga toda la memoria a ningún agente."
+      - "No toma decisiones de producto, arquitectura ni seguridad por sí mismo."
+    human_interaction: "none"
+    reads:
+      - "current_task_summary"
+      - "project_id"
+      - "feature_id"
+      - "workflow_phase"
+      - "agent_registry"
+      - "memory_store_via_mcp"
+    writes:
+      - "memory_context"
+      - "memory_packs"
+      - "memory_context_sources"
+      - "memory_access_log"
+    base_skills:
+      required: []
+      optional:
+        - "obsidian"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "memory"
+        - "retrieval"
+        - "summarization"
+        - "knowledge-base"
+      denied_tags:
+        - "deploy"
+        - "code-execution"
+        - "external-posting"
+        - "destructive"
+    mcp_capabilities:
+      - "memory"
+
+  MemoryManager:
+    layer: 0
+    domain: "core"
+    cross_cutting: true
+    phase: "memory_consolidation"
+    model_profile: "balanced"
+    role: "Responsable de consolidar memoria persistente cross-session: limpia, deduplica, redacta y persiste aprendizajes luego de cada fase/run."
+    responsibilities:
+      - "Extraer candidatos de memoria desde artifacts, eventos, outputs de agentes y mensajes del usuario."
+      - "Redactar secretos antes de guardar memoria."
+      - "Deduplicar, clasificar, rankear y persistir memoria canónica."
+      - "Detectar contradicciones y marcar conflictos."
+      - "Decidir commit, quarantine, reject o aprobación humana según policy."
+      - "Mantener audit log de lecturas/escrituras de memoria."
+      - "Exportar resúmenes a Obsidian cuando corresponda."
+    restrictions:
+      - "No habla directamente con el usuario."
+      - "No decide producto, arquitectura ni implementación por sí mismo."
+      - "No guarda secretos, credenciales, tokens, cookies ni claves privadas."
+      - "No inyecta memoria sin fuente/provenance."
+      - "No carga toda la memoria a ningún agente."
+      - "No convierte outputs temporales en memoria estable sin consolidación."
+    human_interaction: "via_HermesOrchestrator_for_conflicts_or_sensitive_memory"
+    reads:
+      - "current_task_summary"
+      - "project_id"
+      - "run_events"
+      - "canonical_artifacts"
+      - "memory_candidates"
+      - "memory_store_via_mcp"
+    writes:
+      - "memory_manager_slot"
+      - "memory_candidates"
+      - "memory_audit_log"
+      - "memory_store_via_mcp"
+    base_skills:
+      required:
+        - "obsidian"
+      optional:
+        - "writing-plans"
+    dynamic_skill_policy:
+      allowed_tags:
+        - "memory"
+        - "note-taking"
+        - "summarization"
+        - "retrieval"
+        - "knowledge-base"
+      denied_tags:
+        - "deploy"
+        - "code-execution"
+        - "external-posting"
+    mcp_capabilities:
+      - "filesystem_read"
+      - "filesystem_write"
+      - "memory"
+
+future_domains:
+  ResearchOrchestrator:
+    status: "planned"
+    agents:
+      - "Sourcer"
+      - "Analyst"
+      - "Synthesizer"
+  ContentOrchestrator:
+    status: "planned"
+    agents:
+      - "Strategist"
+      - "Writer"
+      - "Editor"
+      - "SEO"
+      - "Designer"
+  BusinessOrchestrator:
+    status: "planned"
+    agents:
+      - "PricingAnalyst"
+      - "UnitEconomicsAnalyst"
+      - "BusinessModelAnalyst"
+  UXOrchestrator:
+    status: "planned"
+    agents:
+      - "UXResearcher"
+      - "UsabilityTester"
+      - "InteractionDesigner"

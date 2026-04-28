@@ -1,0 +1,32 @@
+# Agent Skill Map — overrides del proyecto
+#
+# Este archivo permite agregar/remover skills por agente sin cambiar código.
+# El contrato base vive en ../AGENT-REGISTRY.yaml.
+# Las skills nuevas del usuario primero deben pasar por ~/.hermes/skills-inbox/ y validarse.
+
+version: 1
+updated: "2026-04-28"
+
+assignments:
+  # Ejemplo:
+  # FrontendImplementer:
+  #   add:
+  #     - skill: "new-react-patterns"
+  #       priority: "required" # required | preferred | optional
+  #       reason: "Patrones modernos de React agregados por el usuario"
+  #   remove:
+  #     - "claude-design"
+
+skill_overrides:
+  # Ejemplo:
+  # new-react-patterns:
+  #   trust: "local_trusted"
+  #   allowed_agents:
+  #     - "FrontendImplementer"
+  #     - "Reviewer"
+  #   triggers:
+  #     - type: "file_glob"
+  #       pattern: "**/*.tsx"
+  #       confidence: 0.8
+
+blocked_skills: []

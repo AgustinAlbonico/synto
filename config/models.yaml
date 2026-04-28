@@ -1,0 +1,131 @@
+# Configuración de Modelos por Agente
+# Sistema Hermes Orquestado
+#
+# FORMATO:
+#   agente: modelo
+#
+# Los modelos se resuelven via proveedores (OpenRouter, OpenAI, etc.)
+# Podés usar aliases predefinidos o IDs completos
+#
+# ALIASES DISPONIBLES:
+#   premium     → modelo grande para razonamiento complejo (Claude/GPT-4)
+#   balanced    → modelo medio para tareas normales (GPT-4o-mini/Claude Haiku)
+#   economy     → modelo chico para tareas simples (Haiku/GPT-3.5)
+#
+# PROVEEDORES:
+#   openrouter  → https://openrouter.ai (multi-proveedor, modelos gratis disponibles)
+#   openai      → https://openai.com (API key propia)
+#   anthropic   → https://anthropic.com (API key propia)
+#
+# Para ver todos los modelos disponibles en OpenRouter:
+#   curl https://openrouter.ai/api/v1/models
+
+# =============================================================================
+# PROFILES DE MODELOS
+# =============================================================================
+
+# Profile: PREMIUM (mejor calidad, mayor costo)
+# Usar cuando: razonamiento complejo, conversación natural, decisiones importantes
+premium:
+  openrouter: "openrouter/anthropic/claude-sonnet-4"
+  openai: "gpt-4o"
+  anthropic: "claude-sonnet-4-20250514"
+
+# Profile: BALANCED (buena calidad, costo moderado)
+# Usar cuando: tareas técnicas, implementación, análisis
+balanced:
+  openrouter: "openrouter/google/gemini-2.0-flash-thinking-exp:free"
+  openai: "gpt-4o-mini"
+  anthropic: "claude-haiku-3-20240307"
+
+# Profile: ECONOMY (calidad aceptable, menor costo)
+# Usar cuando: tool agents, tareas repetitivas, búsquedas
+economy:
+  openrouter: "openrouter/meta-llama/llama-3.2-3b-instruct:free"
+  openai: "gpt-3.5-turbo"
+  anthropic: "claude-haiku-3-20240307"
+
+# =============================================================================
+# CAPA 0: ORQUESTADOR PRINCIPAL
+# =============================================================================
+# Necesita el mejor modelo: conversación natural, razonamiento, clarificación
+HermesOrchestrator: premium
+
+# =============================================================================
+# CAPA 1: DOMAIN ORCHESTRATORS
+# =============================================================================
+# Necesitan buen razonamiento para planificar y coordinar
+CodeOrchestrator: premium
+ResearchOrchestrator: balanced
+ContentOrchestrator: balanced
+DevOpsOrchestrator: balanced
+DataOrchestrator: balanced
+BusinessOrchestrator: premium  # Razonamiento complejo para negocios
+UXOrchestrator: balanced
+
+# =============================================================================
+# CAPA 2: CODE SPECIALISTS
+# =============================================================================
+# Razonamiento técnico + conocimiento de código
+Planner: premium              # Descomponer specs requiere razonamiento complejo
+CodebaseExplorer: balanced
+Architect: premium            # Diseño de arquitectura = razonamiento complejo
+Implementer: balanced         # Implementar código (OpenCode hace el trabajo pesado)
+Tester: balanced
+Reviewer: balanced
+SecurityReviewer: balanced
+
+# =============================================================================
+# CAPA 2: RESEARCH SPECIALISTS
+# =============================================================================
+# Análisis + síntesis de información
+Sourcer: economy              # Buscar fuentes es repetitivo
+Analyst: balanced             # Extraer insights requiere algo de razonamiento
+Synthesizer: premium          # Armar reportes coherentes = complejo
+
+# =============================================================================
+# CAPA 2: CONTENT SPECIALISTS
+# =============================================================================
+# Creatividad + calidad de escritura
+Strategist: balanced
+Writer: balanced
+Editor: balanced
+SEO: economy                  # Tareas repetitivas de keywords
+Designer: balanced
+
+# =============================================================================
+# CAPA 2: DEVOPS SPECIALISTS
+# =============================================================================
+InfraArchitect: balanced
+Builder: balanced
+Validator: economy            # Ejecutar tests es repetitivo
+
+# =============================================================================
+# CAPA 2: DATA SPECIALISTS
+# =============================================================================
+Scraper: economy              # Ejecutar scripts
+Cleaner: economy              # Transformaciones repetitivas
+Modeler: balanced             # ML/estadística requiere razonamiento
+Visualizer: balanced
+
+# =============================================================================
+# CAPA 2: BUSINESS SPECIALISTS
+# =============================================================================
+PricingAnalyst: balanced
+UnitEconomicsAnalyst: balanced
+BusinessModelAnalyst: premium  # Canvas + proyecciones = complejo
+
+# =============================================================================
+# CAPA 2: UX SPECIALISTS
+# =============================================================================
+UXResearcher: balanced
+UsabilityTester: balanced
+InteractionDesigner: balanced
+
+# =============================================================================
+# CROSS-CUTTING AGENTS
+# =============================================================================
+# Necesitan ser precisos pero no creativos
+QAGatekeeper: premium         # Verificar specs vs output = razonamiento complejo
+DocumentationAgent: balanced
+ContextManager: economy       # Operaciones de archivos
