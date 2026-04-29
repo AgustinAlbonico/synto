@@ -38,6 +38,7 @@ La arquitectura vigente es:
 | `WEB-INTERFACE-VISION.md` | Visión inicial de la interfaz web futura. |
 | `GUIA-MAESTRA.md` | Documento histórico/base del proyecto. Mantiene decisiones previas y referencia general. |
 | `DEFINICION-AGENTES.md` | Definición original de agentes. Reemplazada parcialmente por `AGENT-REGISTRY.yaml`. |
+| `USER-GUIDE.md` | Guía de uso para el usuario final. Cómo instalar, operar, configurar y resolver problemas de Synto. |
 
 ---
 
