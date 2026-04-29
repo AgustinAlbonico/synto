@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import operator
+import os
 import sqlite3
 import uuid
 from pathlib import Path
@@ -23,11 +24,12 @@ from synto.memory import (
     MemoryStore,
     TaskContext,
 )
-from synto.registry import AgentRegistry
+from synto.registry import AgentRegistry, SkillLoader, SkillRegistry
 from synto.state import SharedState, StateStore
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_REGISTRY_PATH = str(REPO_ROOT / "AGENT-REGISTRY.yaml")
+DEFAULT_AGENT_SKILL_MAP_PATH = str(REPO_ROOT / "config" / "agent-skill-map.yaml")
 DEFAULT_STATE_DIRNAME = ".synto-state"
 
 _PHASE_ARTIFACT_DIRS = {
@@ -109,6 +111,8 @@ _NODE_TO_PHASE = {
 _CHECKPOINTER_CONNECTIONS: list[sqlite3.Connection] = []
 _ROUTER_CACHE: dict[str, LLMMultiProvider] = {}
 _REGISTRY_CACHE: dict[str, AgentRegistry] = {}
+_SKILL_REGISTRY_CACHE: dict[tuple[str, ...], SkillRegistry] = {}
+_SKILL_LOADER_CACHE: dict[tuple[tuple[str, ...], str], SkillLoader] = {}
 
 
 class OrchestratorState(TypedDict, total=False):
@@ -116,6 +120,8 @@ class OrchestratorState(TypedDict, total=False):
     project_id: str
     config_dir: str
     registry_path: str
+    skills_dirs: list[str]
+    agent_skill_map_path: str
     state_root: str
     checkpoint_db_path: str
     memory_db_path: str
@@ -164,12 +170,26 @@ def _default_checkpoint_db_path(state_root: str) -> str:
     return str(Path(state_root) / "state" / "checkpoints.sqlite")
 
 
+def _default_skill_dirs() -> list[str]:
+    env_value = os.getenv("SYNTO_SKILLS_DIRS", "")
+    if env_value:
+        return [entry for entry in env_value.split(os.pathsep) if entry]
+    candidates = [
+        REPO_ROOT / "skills",
+        Path.home() / ".hermes" / "skills",
+        Path.home() / ".hermes" / "custom-skills",
+    ]
+    return [str(path) for path in candidates]
+
+
 def build_initial_state(
     task: str,
     project_id: str = "default",
     *,
     config_dir: str = "",
     registry_path: str = "",
+    skills_dirs: list[str] | None = None,
+    agent_skill_map_path: str = "",
     state_root: str = "",
     checkpoint_db_path: str = "",
     memory_db_path: str = "",
@@ -185,6 +205,8 @@ def build_initial_state(
         "project_id": project_id,
         "config_dir": config_dir,
         "registry_path": registry_path or DEFAULT_REGISTRY_PATH,
+        "skills_dirs": skills_dirs or _default_skill_dirs(),
+        "agent_skill_map_path": agent_skill_map_path or os.getenv("SYNTO_AGENT_SKILL_MAP") or DEFAULT_AGENT_SKILL_MAP_PATH,
         "state_root": resolved_state_root,
         "checkpoint_db_path": checkpoint_db_path or _default_checkpoint_db_path(resolved_state_root),
         "memory_db_path": memory_db_path,
@@ -242,6 +264,8 @@ def _with_defaults(state: OrchestratorState) -> OrchestratorState:
         project_id=state.get("project_id", "default"),
         config_dir=state.get("config_dir", ""),
         registry_path=state.get("registry_path", ""),
+        skills_dirs=list(state.get("skills_dirs", [])),
+        agent_skill_map_path=state.get("agent_skill_map_path", ""),
         state_root=state.get("state_root", ""),
         checkpoint_db_path=state.get("checkpoint_db_path", ""),
         memory_db_path=state.get("memory_db_path", ""),
@@ -266,6 +290,30 @@ def _get_registry(registry_path: str) -> AgentRegistry:
         registry.load()
         _REGISTRY_CACHE[resolved] = registry
     return registry
+
+
+def _get_skill_registry(skills_dirs: list[str] | None = None) -> SkillRegistry:
+    dirs = tuple(str(Path(path).expanduser().resolve()) for path in (skills_dirs or _default_skill_dirs()) if str(path))
+    registry = _SKILL_REGISTRY_CACHE.get(dirs)
+    if registry is None:
+        registry = SkillRegistry(skills_dirs=list(dirs))
+        registry.discover()
+        _SKILL_REGISTRY_CACHE[dirs] = registry
+    return registry
+
+
+def _get_skill_loader(state: OrchestratorState) -> SkillLoader:
+    dirs = tuple(str(Path(path).expanduser().resolve()) for path in state.get("skills_dirs", _default_skill_dirs()) if str(path))
+    assignment_path = str(Path(state.get("agent_skill_map_path") or DEFAULT_AGENT_SKILL_MAP_PATH).expanduser().resolve())
+    key = (dirs, assignment_path)
+    loader = _SKILL_LOADER_CACHE.get(key)
+    if loader is None:
+        loader = SkillLoader(
+            skill_registry=_get_skill_registry(list(dirs)),
+            assignment_path=assignment_path,
+        )
+        _SKILL_LOADER_CACHE[key] = loader
+    return loader
 
 
 def _workflow_phase_ids(state: OrchestratorState) -> list[str]:
@@ -436,6 +484,22 @@ def _artifact_phase_dir(artifact_id: str, fallback_phase_id: str) -> str:
 def _invoke_agent(state: OrchestratorState, agent_name: str, prompt: str) -> tuple[str, dict[str, Any], list[str]]:
     agents = _get_agents(state)
     agent = agents[agent_name]
+    skill_names: list[str] = []
+    skill_skipped: dict[str, str] = {}
+    skill_errors: list[str] = []
+    try:
+        agent_def = _get_registry(state.get("registry_path", DEFAULT_REGISTRY_PATH)).get_agent(agent_name) or {"id": agent_name}
+        skill_state = {**state, "task": "\n\n".join(part for part in [state.get("task", ""), prompt] if part)}
+        resolved_skills = _get_skill_loader(state).resolve(agent_name, agent_def, skill_state)
+        agent.skill_context = resolved_skills.context
+        skill_names = resolved_skills.skill_names
+        skill_skipped = resolved_skills.skipped
+        if resolved_skills.events:
+            _get_state_store(state).append_skill_events(resolved_skills.events)
+    except Exception as exc:  # pragma: no cover - skill injection must never block execution
+        agent.skill_context = ""
+        skill_errors.append(f"{agent_name} skill injection: {exc}")
+
     try:
         result = agent.generate(prompt)
         metadata = {
@@ -443,11 +507,20 @@ def _invoke_agent(state: OrchestratorState, agent_name: str, prompt: str) -> tup
             "provider": result.provider,
             "model": result.model,
             "fallback": False,
+            "skills_loaded": skill_names,
+            "skills_skipped": skill_skipped,
         }
-        return result.output, metadata, []
+        return result.output, metadata, skill_errors
     except Exception as exc:  # pragma: no cover - defensive runtime fallback
         fallback = f"[fallback:{agent_name}] {prompt[:500]}"
-        return fallback, {"agent": agent_name, "provider": "mock", "model": "fallback", "fallback": True}, [f"{agent_name}: {exc}"]
+        return fallback, {
+            "agent": agent_name,
+            "provider": "mock",
+            "model": "fallback",
+            "fallback": True,
+            "skills_loaded": skill_names,
+            "skills_skipped": skill_skipped,
+        }, skill_errors + [f"{agent_name}: {exc}"]
 
 
 def _write_agent_slot_and_drafts(

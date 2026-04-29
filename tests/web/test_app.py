@@ -57,10 +57,15 @@ def _write_run(projects_root: Path) -> Path:
         "approvals": {"prd_gate": {"status": "pending", "requested_by": "ProductManager"}},
         "events_count": 1,
         "last_event": {"type": "prd_gate", "summary": "Gate awaiting approval"},
+        "skill_events_count": 1,
+        "last_skill_event": {"type": "skill_loaded", "agent": "ProductManager", "skill": "writing-plans"},
         "last_updated_at": "2026-04-29T00:00:00+00:00",
     }
     (state_dir / "current-state.json").write_text(json.dumps(snapshot))
     (state_dir / "events.jsonl").write_text(json.dumps({"type": "prd_gate", "summary": "Gate awaiting approval"}) + "\n")
+    (state_dir / "skill-load-events.jsonl").write_text(
+        json.dumps({"type": "skill_loaded", "agent": "ProductManager", "skill": "writing-plans"}) + "\n"
+    )
     return root
 
 
@@ -87,6 +92,10 @@ def test_runs_artifacts_events_and_registry_contract(tmp_path):
     detail = client.get("/api/runs/run-1").json()
     assert detail["run"]["status"] == "waiting_approval"
     assert detail["events"][0]["type"] == "prd_gate"
+    assert detail["skill_events"][0]["skill"] == "writing-plans"
+
+    skill_events = client.get("/api/runs/run-1/skill-events").json()
+    assert skill_events["events"][0]["agent"] == "ProductManager"
 
     artifact = client.get("/api/runs/run-1/artifacts/prd").json()
     assert "Ship the web UI" in artifact["content"]

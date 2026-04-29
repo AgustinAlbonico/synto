@@ -126,6 +126,24 @@ def _read_events(state_root: Path, limit: int = 200) -> list[dict[str, Any]]:
     return events
 
 
+def _read_skill_events(state_root: Path, limit: int = 200) -> list[dict[str, Any]]:
+    events_path = state_root / "state" / "skill-load-events.jsonl"
+    if not events_path.exists():
+        return []
+    lines = [line for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if limit > 0:
+        lines = lines[-limit:]
+    events: list[dict[str, Any]] = []
+    for idx, line in enumerate(lines):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            payload = {"type": "skill_loaded", "summary": line}
+        payload.setdefault("index", idx)
+        events.append(payload)
+    return events
+
+
 def _run_status(snapshot: dict[str, Any]) -> str:
     approvals = snapshot.get("approvals", {}) or {}
     gates = snapshot.get("gates", {}) or {}
@@ -169,6 +187,8 @@ def _summarize_run(snapshot: dict[str, Any], state_root: Path) -> dict[str, Any]
         "pending_approval": pending_approval,
         "events_count": snapshot.get("events_count", 0),
         "last_event": snapshot.get("last_event"),
+        "skill_events_count": snapshot.get("skill_events_count", 0),
+        "last_skill_event": snapshot.get("last_skill_event"),
         "last_updated_at": snapshot.get("last_updated_at", ""),
         "state_root": str(state_root),
         "task": (snapshot.get("shared_state", {}) or {}).get("task", ""),
@@ -300,6 +320,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             project_id=payload.project_id or "default",
             config_dir=str(config.config_dir or ""),
             registry_path=str(config.registry_path),
+            skills_dirs=[str(path) for path in config.skills_dirs],
             state_root=str(state_root),
             memory_db_path=str(config.memory_db_path),
             execution_mode=payload.execution_mode,
@@ -331,6 +352,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             "run": _summarize_run(snapshot, state_root),
             "state": snapshot,
             "events": _read_events(state_root),
+            "skill_events": _read_skill_events(state_root),
         }
 
     @app.get("/api/runs/{run_id}/state")
@@ -342,6 +364,11 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
     def get_run_events(run_id: str, limit: int = Query(200, ge=1, le=2000)) -> dict[str, Any]:
         state_root, _ = _find_run(config, run_id)
         return {"events": _read_events(state_root, limit=limit)}
+
+    @app.get("/api/runs/{run_id}/skill-events")
+    def get_run_skill_events(run_id: str, limit: int = Query(200, ge=1, le=2000)) -> dict[str, Any]:
+        state_root, _ = _find_run(config, run_id)
+        return {"events": _read_skill_events(state_root, limit=limit)}
 
     @app.get("/api/runs/{run_id}/stream")
     async def stream_run(run_id: str) -> StreamingResponse:

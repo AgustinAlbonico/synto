@@ -22,14 +22,17 @@ class BaseAgent:
     system_prompt: str = "You are a helpful AI assistant."
     model_override: str = ""  # empty = resolved from config
 
-    def __init__(self, router: LLMMultiProvider | None = None, memory_context: str = ""):
+    def __init__(self, router: LLMMultiProvider | None = None, memory_context: str = "", skill_context: str = ""):
         self.router = router
         self.memory_context = memory_context
+        self.skill_context = skill_context
 
     def _build_messages(self, task: str, extra: str = "") -> list[dict[str, str]]:
         system = self.system_prompt
         if self.memory_context:
             system += f"\n\n--- Memory Context ---\n{self.memory_context}"
+        if self.skill_context:
+            system += f"\n\n--- Loaded Skills ---\n{self.skill_context}"
         if extra:
             system += f"\n\n--- Additional Context ---\n{extra}"
         return [

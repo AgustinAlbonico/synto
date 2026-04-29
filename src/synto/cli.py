@@ -24,6 +24,8 @@ def cmd_run(args):
         project_id=args.project or "default",
         memory_db_path=args.memory_db,
         config_dir=args.config_dir or "",
+        skills_dirs=args.skills_dir or None,
+        agent_skill_map_path=args.agent_skill_map or "",
     )
 
     print(f"[orchestrator] Running: {args.task}")
@@ -257,6 +259,8 @@ def main():
     p_run.add_argument("--project", default="", help="Project name")
     p_run.add_argument("--config-dir", default="", help="Path to config directory")
     p_run.add_argument("--memory-db", default="memory_store.db", help="Path to memory database")
+    p_run.add_argument("--skills-dir", action="append", default=[], help="Skill directory; can be repeated")
+    p_run.add_argument("--agent-skill-map", default="", help="Path to agent-skill-map.yaml overrides")
     p_run.set_defaults(func=cmd_run)
 
     # memory

@@ -1,7 +1,7 @@
 # Skill Loading System — Registro, carga dinámica y asignación por agente
 
-> Estado: especificación para implementación
-> Fecha: 2026-04-28
+> Estado: MVP implementado (`SkillRegistry` + `SkillLoader.resolve` + inyección lazy + auditoría JSONL)
+> Fecha: 2026-04-29
 > Objetivo: permitir que cada agente cargue solo las skills que necesita, y que el usuario pueda agregar nuevas skills encontradas en internet sin rehacer el sistema.
 
 ---
@@ -473,18 +473,19 @@ La UI web tendrá una pantalla de Skills:
 
 ## 18. MVP técnico
 
-Implementar primero:
+Implementado:
 
-1. `SkillScanner`
-2. `SkillRegistry`
-3. `AgentRegistry` leyendo `AGENT-REGISTRY.yaml`
-4. `SkillLoader.resolve(agent, state)`
-5. `skill-load-events.jsonl`
-6. `agent-skill-map.yaml`
+1. `SkillRegistry` como scanner/registry de metadata.
+2. `AgentRegistry` leyendo `AGENT-REGISTRY.yaml`.
+3. `SkillLoader.resolve(agent, state)` para resolver base skills, overrides, triggers y políticas por agente.
+4. `state/skill-load-events.jsonl` mediante `StateStore.append_skill_events()`.
+5. `config/agent-skill-map.yaml` como archivo de overrides/manual assignments.
+6. Inyección lazy en runtime: cada `_invoke_agent()` agrega `--- Loaded Skills ---` al system prompt del agente.
+7. API web: `GET /api/runs/{run_id}/skill-events`.
 
-Después:
+Pendiente para fases posteriores:
 
-7. importación de skills externas;
-8. validación avanzada;
-9. UI de skills;
-10. auto-sugerencias por embedding/semantic search.
+8. importación de skills externas desde URL/carpeta;
+9. validación avanzada y revisión asistida de skills en inbox;
+10. UI completa para asignar/bloquear/desbloquear skills;
+11. auto-sugerencias por embedding/semantic search.

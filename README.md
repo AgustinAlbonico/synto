@@ -2,7 +2,7 @@
 
 > Sistema de orquestación multi-agente para operar equipos de agentes especializados con SDD, PRD-first, TDD, LangGraph, MCP y Skill Registry dinámico.
 
-Estado actual: **runtime LangGraph + memoria + MCP + CLI + Command Center web local-first implementados**.
+Estado actual: **runtime LangGraph + memoria + MCP + CLI + Command Center web local-first + SkillLoader dinámico implementados**.
 
 ---
 
@@ -119,6 +119,20 @@ Objetivo:
 - El usuario puede agregar skills nuevas encontradas en internet.
 - Las skills externas pasan por inbox/quarantine/validación antes de asignarse.
 - Se soportan base skills, skills manuales, triggers y carga lazy.
+
+Estado implementado:
+
+- `SkillRegistry` descubre metadata de `SKILL.md` sin cargar todo el contenido.
+- `SkillRegistry` clasifica automáticamente tags básicos cuando la skill no declara tags.
+- `SkillLoader.resolve(agent, state)` selecciona skills por agente/invocación usando:
+  - `base_skills.required` y `base_skills.optional` desde `AGENT-REGISTRY.yaml`;
+  - overrides manuales desde `config/agent-skill-map.yaml`;
+  - `dynamic_skill_policy.allowed_tags` / `denied_tags`;
+  - `allowed_agents` en el frontmatter de cada skill para skills dedicadas o compartidas;
+  - triggers por keyword, phase, regex o file glob.
+- El contenido completo se carga lazy, solo para las skills seleccionadas y bajo presupuesto.
+- La ejecución de agentes inyecta el contexto en el system prompt bajo `--- Loaded Skills ---`.
+- Cada carga queda auditada en `state/skill-load-events.jsonl` y expuesta por la API web.
 
 Ver: `SKILL-LOADING-SYSTEM.md`.
 

@@ -31,6 +31,8 @@ _ARTIFACT_SECTION_DEFAULTS = {
     "approvals": {},
     "events_count": 0,
     "last_event": None,
+    "skill_events_count": 0,
+    "last_skill_event": None,
     "result": "",
     "gate_passed": False,
     "gate_errors": [],
@@ -284,6 +286,18 @@ class StateStore:
         current = self._read_current_state()
         current["events_count"] = int(current.get("events_count", 0)) + len(events)
         current["last_event"] = self._redact(events[-1])
+        self._write_current_state(current)
+
+    def append_skill_events(self, events: list[dict[str, Any]]) -> None:
+        if not events:
+            return
+        with self.skill_events_log_path.open("a", encoding="utf-8") as fh:
+            for event in self._redact(events):
+                fh.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+        current = self._read_current_state()
+        current["skill_events_count"] = int(current.get("skill_events_count", 0)) + len(events)
+        current["last_skill_event"] = self._redact(events[-1])
         self._write_current_state(current)
 
     def write_runtime_metadata(self, updates: dict[str, Any]) -> dict[str, Any]:
