@@ -4,54 +4,55 @@
 import argparse
 import json
 import sys
-from pathlib import Path
 
-from synto.workflows import get_compiled
+from synto.workflows import build_initial_state, get_compiled
 from synto.memory import (
-    MemoryStore, MemoryItem, MemoryKind,
-    MemoryPackBuilder, MemoryContextAgent,
-    TaskContext,
+    MemoryStore,
+    MemoryItem,
+    MemoryKind,
 )
 from synto.memory.obsidian_export import export_to_obsidian
-from synto.memory.manager import MemoryManager
-from synto.memory.models import MemoryCandidate
+from synto.mcp.memory_tools import MemoryToolLayer
 from synto.registry import AgentRegistry
 
 
 def cmd_run(args):
     """Run a task through the orchestrator."""
     workflow = get_compiled()
-    initial_state = {
-        "task": args.task,
-        "project_id": args.project or "default",
-        "memory_pack_global": {},
-        "memory_pack_by_agent": {},
-        "discovery_output": "",
-        "plan": "",
-        "implementation_output": "",
-        "test_results": "",
-        "gate_passed": False,
-        "gate_errors": [],
-        "events": [],
-        "errors": [],
-        "result": "",
-    }
+    initial_state = build_initial_state(
+        task=args.task,
+        project_id=args.project or "default",
+        memory_db_path=args.memory_db,
+        config_dir=args.config_dir or "",
+    )
 
     print(f"[orchestrator] Running: {args.task}")
     print(f"[orchestrator] Project: {args.project or 'default'}")
+    print(f"[orchestrator] Memory DB: {args.memory_db}")
 
     result = workflow.invoke(initial_state)
-    print(f"\n{result.get('result', 'no output')}")
+    print("\n=== Run Complete ===")
+    print(result.get("result", "no output"))
     print(f"\n[orchestrator] Events: {len(result.get('events', []))}")
+
+
+
+def _resolve_project_id(store: MemoryStore, project: str) -> str:
+    if not project:
+        return ""
+    proj = store.get_project(project)
+    return proj["id"] if proj else project
+
 
 
 def cmd_memory(args):
     """Memory operations CLI."""
     store = MemoryStore(args.db)
+    tools = MemoryToolLayer(store)
 
     if args.memory_cmd == "init":
-        pid = store.create_project(args.project, args.project)
-        print(f"  Project created: {args.project} (id={pid})")
+        pid = tools.create_project(args.project, args.project)
+        print(f"  Project ready: {args.project} (id={pid})")
 
     elif args.memory_cmd == "add":
         if not args.project:
@@ -78,12 +79,19 @@ def cmd_memory(args):
 
         tid = ""
         if args.topic:
-            tid = store.create_topic(pid, args.topic, args.topic, feature_id=fid)
+            existing_topics = [t for t in store.list_topics(pid, fid) if t["slug"] == args.topic]
+            if existing_topics:
+                tid = existing_topics[0]["id"]
+            else:
+                tid = store.create_topic(pid, args.topic, args.topic, feature_id=fid)
 
         kind = MemoryKind(args.kind) if args.kind else MemoryKind.NOTE
         item = MemoryItem(
-            project_id=pid, feature_id=fid, topic_id=tid,
-            kind=kind, content=text,
+            project_id=pid,
+            feature_id=fid,
+            topic_id=tid,
+            kind=kind,
+            content=text,
             importance=float(args.importance) if args.importance else 0.5,
         )
         mid = store.add_memory_item(item)
@@ -91,10 +99,7 @@ def cmd_memory(args):
 
     elif args.memory_cmd == "search":
         query = args.query or args.query_or_text or args.text
-        pid = args.project or ""
-        if pid:
-            proj = store.get_project(pid)
-            pid = proj["id"] if proj else pid
+        pid = _resolve_project_id(store, args.project or "")
         results = store.search(query, project_id=pid, limit=args.limit)
         if not results:
             print("  No results.")
@@ -126,6 +131,13 @@ def cmd_memory(args):
             for i in items:
                 print(f"  [{i.id}] {i.kind.value}: {i.content[:80]}")
 
+    elif args.memory_cmd == "tree":
+        if not args.project:
+            print("ERROR: --project required", file=sys.stderr)
+            sys.exit(1)
+        tree = tools.get_tree(args.project)
+        print(json.dumps(tree, indent=2))
+
     elif args.memory_cmd == "export":
         if not args.project:
             print("ERROR: --project required", file=sys.stderr)
@@ -142,27 +154,48 @@ def cmd_memory(args):
         if not args.project or not args.agent:
             print("ERROR: --project and --agent required", file=sys.stderr)
             sys.exit(1)
-        proj = store.get_project(args.project)
-        pid = proj["id"] if proj else args.project
-
-        ctx_agent = MemoryContextAgent(store)
-        task = TaskContext(task=args.task or "general", project_id=pid)
-        packs = ctx_agent.hydrate(task, [args.agent], token_budget=4000)
-        pack = packs.get(args.agent)
-        if pack:
-            print(f"  Pack for {args.agent}: {len(pack.items)} items, ~{pack.total_tokens_estimate} tokens")
-            for item in pack.items:
-                print(f"    - {item.title} ({item.source})")
+        pack = tools.build_pack(
+            agent_id=args.agent,
+            task=args.task or "general",
+            project_id=args.project,
+            token_budget=args.limit * 200 if args.limit else 4000,
+        )
+        if pack["items"]:
+            print(f"  Pack for {args.agent}: {len(pack['items'])} items, ~{pack['total_tokens_estimate']} tokens")
+            for item in pack["items"]:
+                print(f"    - {item['title']} ({item['source']})")
         else:
             print("  Empty pack")
 
     elif args.memory_cmd == "candidates":
-        candidates = store.list_candidates(args.project or "")
+        pid = _resolve_project_id(store, args.project or "")
+        candidates = store.list_candidates(pid)
         if not candidates:
             print("  No candidates.")
             return
         for c in candidates:
             print(f"  [{c['id']}] {c['kind']}: {c['content'][:80]} (by {c['source_agent']})")
+
+    elif args.memory_cmd == "commit-candidate":
+        if not args.id:
+            print("ERROR: --id required", file=sys.stderr)
+            sys.exit(1)
+        item_id = tools.commit_candidate(args.id, actor=args.actor)
+        print(f"  Candidate committed: {item_id}")
+
+    elif args.memory_cmd == "reject-candidate":
+        if not args.id:
+            print("ERROR: --id required", file=sys.stderr)
+            sys.exit(1)
+        tools.reject_candidate(args.id, reason=args.reason, actor=args.actor)
+        print(f"  Candidate rejected: {args.id}")
+
+    elif args.memory_cmd == "forget":
+        if not args.id:
+            print("ERROR: --id required", file=sys.stderr)
+            sys.exit(1)
+        tools.forget(args.id, actor=args.actor)
+        print(f"  Memory archived: {args.id}")
 
     elif args.memory_cmd == "audit":
         log = store.get_audit_log(args.limit)
@@ -172,21 +205,24 @@ def cmd_memory(args):
     store.close()
 
 
+
 def cmd_registry(args):
     """Registry operations."""
     reg_path = args.registry or "AGENT-REGISTRY.yaml"
     reg = AgentRegistry(reg_path)
     try:
         reg.load()
-        print(f"  Loaded {len(reg.agent_ids)} agents:")
-        for aid in reg.agent_ids[:10]:
-            agent = reg.get_agent(aid)
-            print(f"    - {aid}: {agent.get('role', 'no role')}")
-        if len(reg.agent_ids) > 10:
-            print(f"    ... and {len(reg.agent_ids) - 10} more")
+        agents = reg.get_agents_by_phase(args.phase) if args.phase else [reg.get_agent(aid) for aid in reg.agent_ids]
+        agents = [agent for agent in agents if agent]
+        print(f"  Loaded {len(agents)} agents:")
+        for agent in agents[:20]:
+            print(f"    - {agent['id']}: {agent.get('role', 'no role')}")
+        if len(agents) > 20:
+            print(f"    ... and {len(agents) - 20} more")
     except Exception as e:
         print(f"  Error: {e}", file=sys.stderr)
         sys.exit(1)
+
 
 
 def main():
@@ -197,15 +233,17 @@ def main():
     p_run = sub.add_parser("run", help="Run a task through the orchestrator")
     p_run.add_argument("task", help="Task description")
     p_run.add_argument("--project", default="", help="Project name")
+    p_run.add_argument("--config-dir", default="", help="Path to config directory")
+    p_run.add_argument("--memory-db", default="memory_store.db", help="Path to memory database")
     p_run.set_defaults(func=cmd_run)
 
     # memory
     p_mem = sub.add_parser("memory", help="Memory operations")
     p_mem.add_argument("memory_cmd", choices=[
-        "init", "add", "search", "stats", "list", "export",
-        "build-pack", "candidates", "audit",
+        "init", "add", "search", "stats", "list", "tree", "export",
+        "build-pack", "candidates", "commit-candidate", "reject-candidate", "forget", "audit",
     ])
-    p_mem.add_argument("query_or_text", nargs="?", default="", help="Text content (for add)")
+    p_mem.add_argument("query_or_text", nargs="?", default="", help="Text content or search query")
     p_mem.add_argument("--project", default="", help="Project name/slug")
     p_mem.add_argument("--feature", default="", help="Feature name/slug")
     p_mem.add_argument("--topic", default="", help="Topic name/slug")
@@ -216,13 +254,17 @@ def main():
     p_mem.add_argument("--task", default="", help="Task context (for build-pack)")
     p_mem.add_argument("--importance", default="", help="Importance 0-1 (for add)")
     p_mem.add_argument("--output", default="", help="Output dir (for export)")
-    p_mem.add_argument("--limit", type=int, default=20, help="Limit (for search/audit)")
+    p_mem.add_argument("--limit", type=int, default=20, help="Limit (for search/audit or pack budget multiplier)")
+    p_mem.add_argument("--id", default="", help="Memory/candidate ID (for forget/commit/reject)")
+    p_mem.add_argument("--reason", default="", help="Reason (for reject-candidate)")
+    p_mem.add_argument("--actor", default="cli", help="Actor name for audit entries")
     p_mem.add_argument("--db", default="memory_store.db", help="Database path")
     p_mem.set_defaults(func=cmd_memory)
 
     # registry
     p_reg = sub.add_parser("registry", help="Agent registry operations")
     p_reg.add_argument("--registry", default="", help="Path to AGENT-REGISTRY.yaml")
+    p_reg.add_argument("--phase", default="", help="Filter registry by phase")
     p_reg.set_defaults(func=cmd_registry)
 
     args = parser.parse_args()

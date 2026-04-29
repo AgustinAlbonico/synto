@@ -83,6 +83,7 @@ class MemoryManager:
                 metadata={"from_candidate": candidate.id, "source_agent": candidate.source_agent},
             )
             item_id = self.store.add_memory_item(item)
+            self.store.reject_candidate(candidate_id, reason="committed_redacted", actor=actor)
             self.store._audit("auto_commit_safe", "system", candidate_id, "committed (redacted)")
             return item_id
         

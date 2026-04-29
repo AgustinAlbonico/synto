@@ -100,6 +100,19 @@ class MemoryStore:
         self.conn.commit()
         return tid
 
+    def list_topics(self, project_id: str, feature_id: str = "") -> list[dict]:
+        if feature_id:
+            c = self.conn.execute(
+                "SELECT * FROM topics WHERE project_id = ? AND feature_id = ? ORDER BY name",
+                (project_id, feature_id),
+            )
+        else:
+            c = self.conn.execute(
+                "SELECT * FROM topics WHERE project_id = ? ORDER BY name",
+                (project_id,),
+            )
+        return [dict(r) for r in c.fetchall()]
+
     # --- Memory Items CRUD ---
 
     def add_memory_item(self, item: MemoryItem, actor: str = "system") -> str:

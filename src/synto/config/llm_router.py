@@ -439,12 +439,17 @@ class LLMMultiProvider:
 
         if os.path.exists(models_path):
             with open(models_path) as f:
-                models_config = yaml.safe_load(f)
-            for key, val in models_config.items():
-                if val in ("premium", "balanced", "economy", "free"):
-                    self.agent_profiles[key] = val
-                else:
-                    self.profile_models[key] = val
+                models_config = yaml.safe_load(f) or {}
+
+            if "agents" in models_config or "profiles" in models_config:
+                self.agent_profiles.update(models_config.get("agents", {}) or {})
+                self.profile_models.update(models_config.get("profiles", {}) or {})
+            else:
+                for key, val in models_config.items():
+                    if val in ("premium", "balanced", "economy", "free"):
+                        self.agent_profiles[key] = val
+                    else:
+                        self.profile_models[key] = val
 
         self._loaded = True
 
@@ -454,14 +459,17 @@ class LLMMultiProvider:
         if provider:
             self.model_to_provider[model_id] = provider
 
-    def resolve_model(self, agent_name: str) -> str:
-        """Resolve agent name → profile → model_id."""
-        profile = self.agent_profiles.get(agent_name, "balanced")
+    def resolve_profile(self, profile: str) -> str:
+        """Resolve a profile name directly to a model_id."""
         model_id = self.profile_models.get(profile, "")
-        if not model_id:
-            # Fallback: use provider-specific defaults
-            return self._default_model_for(profile)
-        return model_id
+        if model_id:
+            return model_id
+        return self._default_model_for(profile)
+
+    def resolve_model(self, agent_name: str, profile: str | None = None) -> str:
+        """Resolve agent name -> profile -> model_id, with optional fallback profile."""
+        effective_profile = self.agent_profiles.get(agent_name, profile or "balanced")
+        return self.resolve_profile(effective_profile)
 
     def _default_model_for(self, tier: str) -> str:
         defaults = {
@@ -469,6 +477,8 @@ class LLMMultiProvider:
             "balanced": "minimax/minimax-m2.5",
             "economy": "qwen2.5:7b",
             "free": "google/gemini-2.0-flash-exp:free",
+            "strategic": "big-pickle",
+            "heavy_coding": "big-pickle",
         }
         return defaults.get(tier, "glm-5.1")
 

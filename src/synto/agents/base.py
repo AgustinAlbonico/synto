@@ -41,7 +41,10 @@ class BaseAgent:
         if self.model_override:
             return self.model_override
         if self.router:
-            return self.router.resolve_model(self.name)
+            return self.router.resolve_model(
+                self.name,
+                profile=getattr(self, "model_profile", None),
+            )
         return "glm-5.1"  # default
 
     def generate(self, task: str, extra: str = "", **kwargs) -> AgentResult:

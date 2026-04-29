@@ -73,7 +73,12 @@ class MemoryContextAgent:
 
     def get_global_context(self, project_id: str, limit: int = 10) -> list[dict]:
         """Get high-level project context (recent, important memories)."""
-        items = self.store.list_by_project(project_id)
+        proj_id = project_id
+        proj = self.store.get_project(project_id)
+        if proj:
+            proj_id = proj["id"]
+
+        items = self.store.list_by_project(proj_id)
         return [
             {
                 "id": i.id,
