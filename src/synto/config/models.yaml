@@ -1,37 +1,6 @@
-# Synto - Model Routing Configuration
-# Supports agent -> profile and profile -> model mappings.
-
-profiles:
-  free: "big-pickle"
-  balanced: "big-pickle"
-  premium: "big-pickle"
-  economy: "big-pickle"
-  strategic: "big-pickle"
-  heavy_coding: "big-pickle"
-
 agents:
-  DiscoveryAgent: free
-  PlannerAgent: balanced
-  ImplementerAgent: heavy_coding
-  TesterAgent: balanced
-  QAGateAgent: balanced
-
-  HermesOrchestrator: strategic
-  CodeOrchestrator: strategic
-  BusinessAnalyst: strategic
-  ProductManager: strategic
-  Planner: strategic
-  CodebaseExplorer: balanced
-  Architect: strategic
-  SystemDesigner: strategic
-  Tester: balanced
-  BackendImplementer: heavy_coding
-  FrontendImplementer: heavy_coding
-  ContractAligner: balanced
-  Reviewer: balanced
-  SecurityReviewer: balanced
-  QAGatekeeper: balanced
-  DependencyChecker: balanced
-  TechnicalWriter: balanced
-  ReleaseManager: strategic
-  Builder: heavy_coding
+  planner: premium
+  builder: economy
+profiles:
+  default: gpt-4o
+  premium: opus
