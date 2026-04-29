@@ -39,6 +39,12 @@ class MemoryContextAgent:
         Returns:
             Dict mapping agent_id -> MemoryPack
         """
+        # Resolve project_id: could be slug or UUID
+        proj_id = task.project_id
+        proj = self.store.get_project(proj_id)
+        if proj:
+            proj_id = proj["id"]
+        
         # Search for memories relevant to the task
         keywords = " ".join(task.task.split()[:10])
         results: list[MemorySearchResult] = []
@@ -46,7 +52,7 @@ class MemoryContextAgent:
         try:
             results = self.store.search(
                 keywords,
-                project_id=task.project_id,
+                project_id=proj_id,
                 limit=50,
             )
         except Exception:

@@ -58,7 +58,12 @@ class MemoryStore:
         return project_id
 
     def get_project(self, slug: str) -> Optional[dict]:
-        c = self.conn.execute("SELECT * FROM projects WHERE slug = ?", (slug,))
+        c = self.conn.execute("SELECT * FROM projects WHERE slug = ? OR id = ?", (slug, slug))
+        row = c.fetchone()
+        return dict(row) if row else None
+
+    def get_project_by_id(self, project_id: str) -> Optional[dict]:
+        c = self.conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
         row = c.fetchone()
         return dict(row) if row else None
 
@@ -144,6 +149,15 @@ class MemoryStore:
     # --- Search ---
 
     def search(self, query: str, project_id: str = "", limit: int = 20) -> list[MemorySearchResult]:
+        # Convert simple space-separated queries to OR for better recall
+        # But don't mangle queries that already have FTS operators
+        fts_query = query
+        terms = query.split()
+        if len(terms) > 1 and " OR " not in query and " AND " not in query and '"' not in query:
+            fts_query = " OR ".join(terms)
+        else:
+            fts_query = query
+
         if project_id:
             c = self.conn.execute(
                 """SELECT m.*, fts.rank
@@ -152,7 +166,7 @@ class MemoryStore:
                    WHERE memory_items_fts MATCH ? AND m.project_id = ? AND m.status = 'active'
                    ORDER BY fts.rank
                    LIMIT ?""",
-                (query, project_id, limit),
+                (fts_query, project_id, limit),
             )
         else:
             c = self.conn.execute(
@@ -162,7 +176,7 @@ class MemoryStore:
                    WHERE memory_items_fts MATCH ? AND m.status = 'active'
                    ORDER BY fts.rank
                    LIMIT ?""",
-                (query, limit),
+                (fts_query, limit),
             )
         results = []
         for row in c.fetchall():
