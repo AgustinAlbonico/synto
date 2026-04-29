@@ -49,13 +49,13 @@ economy:
 # CAPA 0: ORQUESTADOR PRINCIPAL
 # =============================================================================
 # Necesita el mejor modelo: conversación natural, razonamiento, clarificación
-HermesOrchestrator: premium
+OrchestratorAgent: premium
 
 # =============================================================================
 # CAPA 1: DOMAIN ORCHESTRATORS
 # =============================================================================
 # Necesitan buen razonamiento para planificar y coordinar
-CodeOrchestrator: premium
+OrchestratorAgent: premium
 ResearchOrchestrator: balanced
 ContentOrchestrator: balanced
 DevOpsOrchestrator: balanced
@@ -67,21 +67,21 @@ UXOrchestrator: balanced
 # CAPA 2: CODE SPECIALISTS
 # =============================================================================
 # Razonamiento técnico + conocimiento de código
-Planner: premium              # Descomponer specs requiere razonamiento complejo
+PlannerAgent: premium              # Descomponer specs requiere razonamiento complejo
 CodebaseExplorer: balanced
 Architect: premium            # Diseño de arquitectura = razonamiento complejo
-Implementer: balanced         # Implementar código (OpenCode hace el trabajo pesado)
-Tester: balanced
-Reviewer: balanced
-SecurityReviewer: balanced
+ImplementerAgent: balanced         # Implementar código (OpenCode hace el trabajo pesado)
+TesterAgent: balanced
+QAGateAgent: balanced
+SecurityQAGateAgent: balanced
 
 # =============================================================================
 # CAPA 2: RESEARCH SPECIALISTS
 # =============================================================================
 # Análisis + síntesis de información
-Sourcer: economy              # Buscar fuentes es repetitivo
-Analyst: balanced             # Extraer insights requiere algo de razonamiento
-Synthesizer: premium          # Armar reportes coherentes = complejo
+DiscoveryAgent: economy              # Buscar fuentes es repetitivo
+DiscoveryAgent: balanced             # Extraer insights requiere algo de razonamiento
+PlannerAgent: premium          # Armar reportes coherentes = complejo
 
 # =============================================================================
 # CAPA 2: CONTENT SPECIALISTS
@@ -111,21 +111,21 @@ Visualizer: balanced
 # =============================================================================
 # CAPA 2: BUSINESS SPECIALISTS
 # =============================================================================
-PricingAnalyst: balanced
-UnitEconomicsAnalyst: balanced
-BusinessModelAnalyst: premium  # Canvas + proyecciones = complejo
+PricingDiscoveryAgent: balanced
+UnitEconomicsDiscoveryAgent: balanced
+BusinessModelDiscoveryAgent: premium  # Canvas + proyecciones = complejo
 
 # =============================================================================
 # CAPA 2: UX SPECIALISTS
 # =============================================================================
 UXResearcher: balanced
-UsabilityTester: balanced
+UsabilityTesterAgent: balanced
 InteractionDesigner: balanced
 
 # =============================================================================
 # CROSS-CUTTING AGENTS
 # =============================================================================
 # Necesitan ser precisos pero no creativos
-QAGatekeeper: premium         # Verificar specs vs output = razonamiento complejo
-DocumentationAgent: balanced
-ContextManager: economy       # Operaciones de archivos
+QAGateAgent: premium         # Verificar specs vs output = razonamiento complejo
+PlannerAgent: balanced
+DiscoveryAgent: economy       # Operaciones de archivos

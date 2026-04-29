@@ -21,6 +21,7 @@ def test_workflow_runs_end_to_end(workflow):
     initial_state = {
         "task": "Build a login API endpoint",
         "project_id": "test-project",
+        "config_dir": "",
         "memory_pack_global": {},
         "memory_pack_by_agent": {},
         "discovery_output": "",
@@ -57,6 +58,7 @@ def test_workflow_has_memory_packs(workflow):
     initial_state = {
         "task": "test",
         "project_id": "proj",
+        "config_dir": "",
         "memory_pack_global": {},
         "memory_pack_by_agent": {},
         "discovery_output": "",
@@ -82,6 +84,7 @@ def test_workflow_gate_failure_retry(workflow):
     initial_state = {
         "task": "impossible task",
         "project_id": "test",
+        "config_dir": "",
         "memory_pack_global": {},
         "memory_pack_by_agent": {},
         "discovery_output": "",

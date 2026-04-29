@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TypedDict, Annotated, Optional, Any
 import operator
 
 from langgraph.graph import StateGraph, END
 
+from synto.config.llm_router import LLMMultiProvider
+from synto.agents import (
+    DiscoveryAgent, PlannerAgent, ImplementerAgent,
+    TesterAgent, QAGateAgent, AgentResult,
+)
 from synto.memory import (
     MemoryStore, MemoryContextAgent, MemoryManager,
     MemoryPackBuilder, TaskContext, MemoryCandidate, MemoryKind,
@@ -22,6 +28,8 @@ class OrchestratorState(TypedDict):
     # Input
     task: str
     project_id: str
+    # LLM router config
+    config_dir: str
     # Memory
     memory_pack_global: dict[str, Any]
     memory_pack_by_agent: dict[str, Any]
@@ -40,7 +48,40 @@ class OrchestratorState(TypedDict):
     result: str
 
 
+# --- LLM Router (global per run) ---
+
+_router: LLMMultiProvider | None = None
+
+
+def _get_router(config_dir: str) -> LLMMultiProvider:
+    global _router
+    if _router is None and os.path.isdir(config_dir):
+        _router = LLMMultiProvider(config_dir)
+    elif _router is None:
+        _router = LLMMultiProvider()
+    return _router
+
+
+def _reset_router():
+    global _router
+    _router = None
+
+
 # --- Node functions ---
+
+def _memory_text(state: OrchestratorState) -> str:
+    mem = state.get("memory_pack_global", {})
+    ctx = mem.get("context", [])
+    if not ctx:
+        return ""
+    parts = []
+    for item in ctx:
+        if isinstance(item, dict):
+            parts.append(f"- [{item.get('kind', '')}] {item.get('content', '')[:200]}")
+        else:
+            parts.append(f"- {str(item)[:200]}")
+    return "\n".join(parts)
+
 
 def intake(state: OrchestratorState) -> dict:
     """Validate and normalize input."""
@@ -64,7 +105,6 @@ def memory_rehydration(state: OrchestratorState) -> dict:
     task = state.get("task", "")
     project_id = state.get("project_id", "default")
 
-    # Try to build memory context
     try:
         db_path = f"memory_{project_id}.db"
         store = MemoryStore(db_path)
@@ -72,14 +112,9 @@ def memory_rehydration(state: OrchestratorState) -> dict:
         pack_builder = MemoryPackBuilder()
 
         task_ctx = TaskContext(task=task, project_id=project_id)
-
-        # Global context
         global_ctx = context_agent.get_global_context(project_id, limit=5)
-
-        # Agent packs (for known agent roles)
         agents = ["discovery-agent", "planner-agent", "implementer-agent", "tester-agent"]
         packs = context_agent.hydrate(task_ctx, agents, token_budget=3000)
-
         store.close()
 
         return {
@@ -97,89 +132,152 @@ def memory_rehydration(state: OrchestratorState) -> dict:
 
 def discovery(state: OrchestratorState) -> dict:
     """Understand the task, gather context, identify constraints."""
-    mem = state.get("memory_pack_global", {})
-    mem_info = f" ({len(mem.get('context', []))} memories found)" if mem else ""
+    mem_text = _memory_text(state)
+    router = _get_router(state.get("config_dir", ""))
+    agent = DiscoveryAgent(router=router, memory_context=mem_text)
+    extra = f"Project ID: {state.get('project_id', 'default')}"
 
-    discovery_out = (
-        f"Discovery for: {state.get('task', 'no task')}\n"
-        f"Project: {state.get('project_id', 'default')}\n"
-        f"Memory context loaded: {bool(mem)}{mem_info}\n"
-        f"Status: discovery complete (mock)"
-    )
-    return {
-        "discovery_output": discovery_out,
-        "events": [{"type": "discovery", "ts": time.time()}],
-        "errors": [],
-    }
+    try:
+        result = agent.generate(state.get("task", ""))
+        return {
+            "discovery_output": result.output,
+            "events": [{"type": "discovery", "model": result.model, "provider": result.provider, "ts": time.time()}],
+            "errors": [],
+        }
+    except Exception as e:
+        # Fallback to mock if LLM unavailable
+        return {
+            "discovery_output": (
+                f"Discovery for: {state.get('task', 'no task')}\n"
+                f"Project: {state.get('project_id', 'default')}\n"
+                f"[LLM unavailable, using mock]\n"
+                f"Status: discovery complete"
+            ),
+            "events": [{"type": "discovery", "model": agent.resolve_model(), "provider": "none", "fallback": True, "ts": time.time()}],
+            "errors": [f"discovery LLM error: {e}"],
+        }
 
 
 def planning(state: OrchestratorState) -> dict:
     """Create a detailed implementation plan."""
-    plan = (
-        f"Plan for: {state.get('task', 'no task')}\n"
-        f"1. Analyze requirements from discovery\n"
-        f"2. Design architecture\n"
-        f"3. Implement components\n"
-        f"4. Write tests\n"
-        f"5. Review and finalize\n"
-        f"Status: planning complete (mock)"
+    router = _get_router(state.get("config_dir", ""))
+    agent = PlannerAgent(router=router, memory_context=_memory_text(state))
+
+    task_input = (
+        f"Task: {state.get('task', '')}\n\n"
+        f"Discovery:\n{state.get('discovery_output', '')}"
     )
-    return {
-        "plan": plan,
-        "events": [{"type": "planning", "ts": time.time()}],
-        "errors": [],
-    }
+
+    try:
+        result = agent.generate(task_input)
+        return {
+            "plan": result.output,
+            "events": [{"type": "planning", "model": result.model, "provider": result.provider, "ts": time.time()}],
+            "errors": [],
+        }
+    except Exception as e:
+        return {
+            "plan": (
+                f"Plan for: {state.get('task', 'no task')}\n"
+                f"1. Analyze requirements from discovery\n"
+                f"2. Design architecture\n"
+                f"3. Implement components\n"
+                f"4. Write tests\n"
+                f"5. Review and finalize\n"
+                f"[LLM unavailable, using mock]"
+            ),
+            "events": [{"type": "planning", "model": agent.resolve_model(), "provider": "none", "fallback": True, "ts": time.time()}],
+            "errors": [f"planning LLM error: {e}"],
+        }
 
 
 def implementation(state: OrchestratorState) -> dict:
     """Execute the plan — create code, configs, etc."""
-    output = (
-        f"Implementation for: {state.get('task', 'no task')}\n"
-        f"Plan: {state.get('plan', 'no plan')[:100]}...\n"
-        f"Status: implementation complete (mock)"
+    router = _get_router(state.get("config_dir", ""))
+    agent = ImplementerAgent(router=router, memory_context=_memory_text(state))
+
+    task_input = (
+        f"Task: {state.get('task', '')}\n\n"
+        f"Plan:\n{state.get('plan', '')}"
     )
-    return {
-        "implementation_output": output,
-        "events": [{"type": "implementation", "ts": time.time()}],
-        "errors": [],
-    }
+
+    try:
+        result = agent.generate(task_input)
+        return {
+            "implementation_output": result.output,
+            "events": [{"type": "implementation", "model": result.model, "provider": result.provider, "ts": time.time()}],
+            "errors": [],
+        }
+    except Exception as e:
+        return {
+            "implementation_output": f"[LLM unavailable] Would implement: {state.get('task', '')[:100]}",
+            "events": [{"type": "implementation", "model": agent.resolve_model(), "provider": "none", "fallback": True, "ts": time.time()}],
+            "errors": [f"implementation LLM error: {e}"],
+        }
 
 
 def testing(state: OrchestratorState) -> dict:
     """Run tests and validate output."""
-    results = (
-        f"Testing for: {state.get('task', 'no task')}\n"
-        f"Tests: 0/0 run (mock)\n"
-        f"Status: testing complete (mock)"
+    router = _get_router(state.get("config_dir", ""))
+    agent = TesterAgent(router=router, memory_context=_memory_text(state))
+
+    task_input = (
+        f"Task: {state.get('task', '')}\n\n"
+        f"Implementation:\n{state.get('implementation_output', '')[:2000]}"
     )
-    return {
-        "test_results": results,
-        "events": [{"type": "testing", "ts": time.time()}],
-        "errors": [],
-    }
+
+    try:
+        result = agent.generate(task_input)
+        return {
+            "test_results": result.output,
+            "events": [{"type": "testing", "model": result.model, "provider": result.provider, "ts": time.time()}],
+            "errors": [],
+        }
+    except Exception as e:
+        return {
+            "test_results": f"[LLM unavailable] Would test: {state.get('task', '')[:100]}",
+            "events": [{"type": "testing", "model": agent.resolve_model(), "provider": "none", "fallback": True, "ts": time.time()}],
+            "errors": [f"testing LLM error: {e}"],
+        }
 
 
 def quality_gate(state: OrchestratorState) -> dict:
     """Evaluate quality gates. Decide if we proceed or retry."""
+    router = _get_router(state.get("config_dir", ""))
+    agent = QAGateAgent(router=router)
+
     has_plan = bool(state.get("plan"))
     has_impl = bool(state.get("implementation_output"))
     has_tests = bool(state.get("test_results"))
 
-    passed = has_plan and has_impl and has_tests
-    errors = []
-    if not has_plan:
-        errors.append("no plan")
-    if not has_impl:
-        errors.append("no implementation")
-    if not has_tests:
-        errors.append("no test results")
+    gate_input = (
+        f"Task: {state.get('task', '')}\n\n"
+        f"Plan:\n{state.get('plan', '')[:2000]}\n\n"
+        f"Implementation:\n{state.get('implementation_output', '')[:2000]}\n\n"
+        f"Tests:\n{state.get('test_results', '')[:2000]}"
+    )
 
-    return {
-        "gate_passed": passed,
-        "gate_errors": errors,
-        "events": [{"type": "quality_gate", "passed": passed, "errors": errors, "ts": time.time()}],
-        "errors": [],
-    }
+    try:
+        result = agent.generate(gate_input)
+        passed = "PASSED" in result.output.upper() and "FAILED" not in result.output.upper().split("PASSED")[0]
+        return {
+            "gate_passed": passed,
+            "gate_errors": [] if passed else [result.output[:200]],
+            "events": [{"type": "quality_gate", "passed": passed, "model": result.model, "provider": result.provider, "ts": time.time()}],
+            "errors": [],
+        }
+    except Exception as e:
+        # Fallback: structural check
+        errors = []
+        if not has_plan: errors.append("no plan")
+        if not has_impl: errors.append("no implementation")
+        if not has_tests: errors.append("no test results")
+        return {
+            "gate_passed": len(errors) == 0,
+            "gate_errors": errors,
+            "events": [{"type": "quality_gate", "passed": len(errors) == 0, "fallback": True, "ts": time.time()}],
+            "errors": [],
+        }
 
 
 def memory_consolidation(state: OrchestratorState) -> dict:
@@ -189,12 +287,9 @@ def memory_consolidation(state: OrchestratorState) -> dict:
         project_id = state.get("project_id", "default")
         db_path = _tf.mktemp(suffix="_memory.db")
         store = MemoryStore(db_path)
-        # Create project if not exists (needed when DB is fresh)
         store.create_project(project_id, project_id)
 
         mgr = MemoryManager(store)
-
-        # Create candidates from run outputs
         candidates = []
         if state.get("plan"):
             candidates.append(MemoryCandidate(
@@ -202,7 +297,7 @@ def memory_consolidation(state: OrchestratorState) -> dict:
                 title="Run plan",
                 content=state["plan"],
                 project_id=project_id,
-                source_agent="planner-agent",
+                source_agent="PlannerAgent",
             ))
         if state.get("implementation_output"):
             candidates.append(MemoryCandidate(
@@ -210,7 +305,7 @@ def memory_consolidation(state: OrchestratorState) -> dict:
                 title="Run implementation",
                 content=state["implementation_output"][:500],
                 project_id=project_id,
-                source_agent="implementer-agent",
+                source_agent="ImplementerAgent",
             ))
 
         summary = mgr.consolidate_run(candidates, actor="orchestrator")
@@ -248,22 +343,9 @@ def delivery(state: OrchestratorState) -> dict:
 # --- Graph builder ---
 
 def build_workflow() -> StateGraph:
-    """Build the full orchestration workflow.
-
-    Phases:
-      1. intake
-      2. memory_rehydration
-      3. discovery
-      4. planning
-      5. implementation
-      6. testing
-      7. quality_gate (conditional: retry → discovery or proceed)
-      8. memory_consolidation
-      9. delivery
-    """
+    """Build the full orchestration workflow."""
     workflow = StateGraph(OrchestratorState)
 
-    # Add nodes
     workflow.add_node("intake", intake)
     workflow.add_node("memory_rehydration", memory_rehydration)
     workflow.add_node("discovery", discovery)
@@ -274,10 +356,8 @@ def build_workflow() -> StateGraph:
     workflow.add_node("memory_consolidation", memory_consolidation)
     workflow.add_node("delivery", delivery)
 
-    # Entry
     workflow.set_entry_point("intake")
 
-    # Linear flow
     workflow.add_edge("intake", "memory_rehydration")
     workflow.add_edge("memory_rehydration", "discovery")
     workflow.add_edge("discovery", "planning")
@@ -285,7 +365,6 @@ def build_workflow() -> StateGraph:
     workflow.add_edge("implementation", "testing")
     workflow.add_edge("testing", "quality_gate")
 
-    # Conditional retry
     workflow.add_conditional_edges(
         "quality_gate",
         lambda s: "memory_consolidation" if s.get("gate_passed", False) else "discovery",

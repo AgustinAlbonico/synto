@@ -1,0 +1,15 @@
+# Synto - Model Routing Configuration
+# Maps agent names to profiles, profiles to models (via OpenCode Zen)
+
+# Agent name -> profile mapping (using actual class names from workflow_agents.py)
+DiscoveryAgent: free
+PlannerAgent: free
+ImplementerAgent: free
+TesterAgent: free
+QAGateAgent: free
+
+# Profile -> model_id mapping (all using Zen free models)
+free: "big-pickle"
+balanced: "big-pickle"
+premium: "big-pickle"
+economy: "big-pickle"
