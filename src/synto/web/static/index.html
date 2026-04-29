@@ -25,6 +25,7 @@
         <button data-section="skills">Skills</button>
         <button data-section="memory">Memory</button>
         <button data-section="design-system">Design system</button>
+        <button data-section="llm-providers">LLM Providers</button>
       </nav>
       <div class="rail-card">
         <span class="eyebrow">Local-first</span>
@@ -193,6 +194,33 @@
           <button id="loadDesignBtn" class="ghost">Cargar diseño del proyecto</button>
         </div>
         <pre id="designSystemViewer" class="state-viewer">Esperando proyecto…</pre>
+      </section>
+
+      <section id="llm-providers" class="panel section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">LLM Provider Manager</span>
+            <h2>Proveedores y modelos</h2>
+          </div>
+          <button id="refreshProvidersBtn" class="ghost">Refrescar</button>
+        </div>
+        <div id="providersList" class="stack"></div>
+        <div class="section-head" style="margin-top: 2rem;">
+          <div>
+            <span class="eyebrow">Model Catalog</span>
+            <h2>Todos los modelos</h2>
+          </div>
+          <input id="modelFilter" class="filter" placeholder="Filtrar modelo/proveedor/tier" />
+        </div>
+        <div id="modelsTable" class="model-table"></div>
+        <div class="section-head" style="margin-top: 2rem;">
+          <div>
+            <span class="eyebrow">Agent Profiles</span>
+            <h2>Perfiles de agentes → Modelos</h2>
+          </div>
+          <button id="saveProfilesBtn" class="primary small">Guardar perfiles</button>
+        </div>
+        <div id="profilesEditor" class="stack"></div>
       </section>
     </main>
 

@@ -327,9 +327,228 @@ async function loadDesignSystem() {
   logActivity(`Design system cargado para ${project}`);
 }
 
+// ── LLM Providers ──────────────────────────────────────────────────────────
+
+state.providers = [];
+state.allModels = [];
+state.profiles = {};
+
+async function loadProviders() {
+  const data = await api("/api/llm/providers");
+  state.providers = data.providers || [];
+  renderProviders();
+}
+
+async function loadAllModels() {
+  const data = await api("/api/llm/models");
+  state.allModels = data.models || [];
+  renderAllModels();
+}
+
+async function loadProfiles() {
+  const data = await api("/api/llm/profiles");
+  state.profiles = data.profiles || {};
+  renderProfiles();
+}
+
+function renderProviders() {
+  const tierIcons = { free: "🆓", economy: "💰", balanced: "⚖️", premium: "💎" };
+  $("#providersList").innerHTML = state.providers.map((p) => {
+    const statusIcon = p.configured ? "✅" : "❌";
+    const authLabel = p.auth_type === "oauth" ? "OAuth" : p.auth_type === "api_key" ? "API Key" : p.auth_type === "none" ? "Sin auth" : p.auth_type;
+    const models = p.models || [];
+    const freeCount = models.filter((m) => m.tier === "free").length;
+    return `
+      <article class="provider-card" data-provider="${p.id}">
+        <div class="provider-header">
+          <div>
+            <h3>${statusIcon} ${escapeHtml(p.name)}</h3>
+            <span class="muted">${escapeHtml(authLabel)} · ${models.length} modelos (${freeCount} gratis)</span>
+          </div>
+          <div class="provider-actions">
+            ${p.signup_url ? `<a href="${escapeHtml(p.signup_url)}" target="_blank" class="ghost small">Crear cuenta</a>` : ""}
+            <button class="ghost small" onclick="testProvider('${escapeHtml(p.id)}')">Test</button>
+            <button class="ghost small" onclick="editProvider('${escapeHtml(p.id)}')">Editar</button>
+          </div>
+        </div>
+        <div class="provider-config">
+          ${p.auth_type === "api_key" ? `
+            <label>API Key
+              <input type="password" value="${escapeHtml(p.api_key_masked || "")}" data-provider="${p.id}" data-field="api_key" placeholder="sk-..." />
+            </label>
+          ` : ""}
+          ${p.auth_type === "oauth" ? `
+            <label>Auth file path
+              <input type="text" value="${escapeHtml(p.auth_file || "")}" data-provider="${p.id}" data-field="auth_file" placeholder="~/.local/share/opencode/auth.json" />
+            </label>
+            <p class="muted">Synto lee el access token de OpenCode auth.json automáticamente.</p>
+          ` : ""}
+          ${p.auth_type === "none" ? `
+            <p class="muted">Sin autenticación requerida. Asegurate de que el servicio esté corriendo.</p>
+          ` : ""}
+        </div>
+        <details>
+          <summary class="muted">${models.length} modelos</summary>
+          <table class="mini-table">
+            <thead><tr><th>Modelo</th><th>Contexto</th><th>Tier</th><th>Capabilities</th></tr></thead>
+            <tbody>${models.map((m) => `
+              <tr>
+                <td><code>${escapeHtml(m.id)}</code></td>
+                <td>${(m.context_window / 1024).toFixed(0)}K</td>
+                <td>${tierIcons[m.tier] || m.tier} ${m.tier}</td>
+                <td>${(m.capabilities || []).join(", ")}</td>
+              </tr>
+            `).join("")}</tbody>
+          </table>
+        </details>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderAllModels() {
+  const tierIcons = { free: "🆓", economy: "💰", balanced: "⚖️", premium: "💎" };
+  const filter = ($("#modelFilter")?.value || "").toLowerCase();
+  let models = state.allModels;
+  if (filter) {
+    models = models.filter((m) =>
+      m.id.toLowerCase().includes(filter) ||
+      m.provider_name.toLowerCase().includes(filter) ||
+      m.tier.toLowerCase().includes(filter) ||
+      (m.capabilities || []).some((c) => c.toLowerCase().includes(filter))
+    );
+  }
+  $("#modelsTable").innerHTML = `
+    <table class="mini-table">
+      <thead><tr><th>Modelo</th><th>Proveedor</th><th>Contexto</th><th>Tier</th><th>Capabilities</th></tr></thead>
+      <tbody>${models.map((m) => `
+        <tr>
+          <td><code>${escapeHtml(m.id)}</code></td>
+          <td>${escapeHtml(m.provider_name)}</td>
+          <td>${(m.context_window / 1024).toFixed(0)}K</td>
+          <td>${tierIcons[m.tier] || m.tier} ${m.tier}</td>
+          <td>${(m.capabilities || []).join(", ")}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="5" class="muted">Sin resultados</td></tr>`}</tbody>
+    </table>
+  `;
+}
+
+function renderProfiles() {
+  const profiles = state.profiles;
+  const agents = profiles.agents || {};
+  const profilesData = profiles.profiles || {};
+  let html = "";
+  // Agent → Profile mapping
+  html += `<h4>Agentes → Perfiles</h4>`;
+  for (const [agent, profile] of Object.entries(agents)) {
+    html += `
+      <div class="form-row">
+        <label style="min-width: 180px;">${escapeHtml(agent)}</label>
+        <input type="text" value="${escapeHtml(profile)}" data-agent-profile="${escapeHtml(agent)}" class="profile-input" />
+      </div>
+    `;
+  }
+  // Profile → Model mapping
+  html += `<h4 style="margin-top:1rem;">Perfiles → Modelos</h4>`;
+  for (const [profile, model] of Object.entries(profilesData)) {
+    html += `
+      <div class="form-row">
+        <label style="min-width: 180px;">${escapeHtml(profile)}</label>
+        <input type="text" value="${escapeHtml(model)}" data-profile-model="${escapeHtml(profile)}" class="profile-model-input" />
+      </div>
+    `;
+  }
+  if (!Object.keys(agents).length && !Object.keys(profilesData).length) {
+    html = `<p class="muted">No hay perfiles configurados. Configurá models.yaml desde la UI o manualmente.</p>`;
+  }
+  $("#profilesEditor").innerHTML = html;
+}
+
+async function testProvider(providerId) {
+  try {
+    const data = await api(`/api/llm/providers/${encodeURIComponent(providerId)}/test`, { method: "POST" });
+    logActivity(`Test ${providerId}: ${data.available ? "✅ Conectado" : "❌ No disponible"} (${data.models_count} modelos)`);
+    alert(`${providerId}: ${data.available ? "Conectado" : "No disponible"} — ${data.models_count} modelos`);
+  } catch (err) {
+    logActivity(`Test ${providerId}: ${err.message}`);
+    alert(`Error: ${err.message}`);
+  }
+}
+
+async function saveProviderConfig(providerId) {
+  const card = document.querySelector(`.provider-card[data-provider="${providerId}"]`);
+  if (!card) return;
+  const payload = {};
+  const keyInput = card.querySelector('[data-field="api_key"]');
+  const authInput = card.querySelector('[data-field="auth_file"]');
+  if (keyInput && keyInput.value && !keyInput.value.includes("***")) {
+    payload.api_key = keyInput.value;
+  }
+  if (authInput) {
+    payload.auth_file = authInput.value;
+  }
+  if (Object.keys(payload).length === 0) {
+    logActivity(`No hay cambios para ${providerId}`);
+    return;
+  }
+  try {
+    await api(`/api/llm/providers/${encodeURIComponent(providerId)}`, { method: "PUT", body: payload });
+    logActivity(`Config guardada para ${providerId}`);
+    await loadProviders();
+  } catch (err) {
+    logActivity(`Error guardando ${providerId}: ${err.message}`);
+  }
+}
+
+function editProvider(providerId) {
+  const card = document.querySelector(`.provider-card[data-provider="${providerId}"]`);
+  if (!card) return;
+  const keyInput = card.querySelector('[data-field="api_key"]');
+  if (keyInput) {
+    keyInput.type = keyInput.type === "password" ? "text" : "password";
+  }
+  // Add save button
+  let saveBtn = card.querySelector(".save-config-btn");
+  if (!saveBtn) {
+    saveBtn = document.createElement("button");
+    saveBtn.className = "primary small save-config-btn";
+    saveBtn.textContent = "Guardar config";
+    saveBtn.addEventListener("click", () => saveProviderConfig(providerId));
+    const actions = card.querySelector(".provider-actions");
+    actions.appendChild(saveBtn);
+  }
+}
+
+async function saveProfiles() {
+  const payload = { agents: {}, profiles: {} };
+  document.querySelectorAll(".profile-input").forEach((input) => {
+    payload.agents[input.dataset.agentProfile] = input.value;
+  });
+  document.querySelectorAll(".profile-model-input").forEach((input) => {
+    payload.profiles[input.dataset.profileModel] = input.value;
+  });
+  try {
+    await api("/api/llm/profiles", { method: "PUT", body: payload });
+    logActivity("Perfiles guardados");
+    await loadProfiles();
+  } catch (err) {
+    logActivity(`Error guardando perfiles: ${err.message}`);
+  }
+}
+
+async function refreshLLMData() {
+  try {
+    await Promise.all([loadProviders(), loadAllModels(), loadProfiles()]);
+    logActivity("LLM providers actualizados");
+  } catch (err) {
+    logActivity(`Error cargando LLM: ${err.message}`);
+  }
+}
+
 async function refreshAll() {
   try {
-    await Promise.all([loadHealth(), loadRuns(), loadAgents(), loadSkills(), loadMemoryStats()]);
+    await Promise.all([loadHealth(), loadRuns(), loadAgents(), loadSkills(), loadMemoryStats(), refreshLLMData()]);
     logActivity("Datos actualizados.");
   } catch (err) {
     logActivity(`Error: ${err.message}`);
@@ -346,6 +565,9 @@ function bindEvents() {
   $("#skillFilter").addEventListener("input", renderSkills);
   $("#memorySearchForm").addEventListener("submit", memorySearch);
   $("#loadDesignBtn").addEventListener("click", loadDesignSystem);
+  $("#refreshProvidersBtn").addEventListener("click", refreshLLMData);
+  $("#modelFilter").addEventListener("input", renderAllModels);
+  $("#saveProfilesBtn").addEventListener("click", saveProfiles);
 }
 
 bindEvents();

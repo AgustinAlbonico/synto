@@ -276,3 +276,78 @@ input:focus, textarea:focus, select:focus { border-color: rgba(185, 111, 60, .7)
   .grid.two, .metrics { grid-template-columns: 1fr; }
   .command-panel { position: static; }
 }
+
+/* ── LLM Provider Manager ─────────────────────────────────────────── */
+
+.provider-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255,255,255,.45);
+  padding: 16px;
+}
+.provider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.provider-header h3 { margin: 0; font-size: 1.1rem; }
+.provider-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.provider-config {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.35);
+}
+.provider-config label { margin: 0; }
+.provider-config details {
+  margin-top: 10px;
+  cursor: pointer;
+}
+.provider-config summary {
+  padding: 6px 0;
+  user-select: none;
+}
+
+.mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .86rem;
+}
+.mini-table th, .mini-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.mini-table th {
+  font-size: .76rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--ink-soft);
+}
+.mini-table code {
+  font-family: var(--mono);
+  font-size: .82rem;
+  background: rgba(0,0,0,.06);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+#profilesEditor .form-row {
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+#profilesEditor label {
+  display: inline;
+  min-width: 180px;
+  font-weight: 600;
+  color: var(--ink);
+  font-size: .9rem;
+}
+#profilesEditor input {
+  max-width: 340px;
+}

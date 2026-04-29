@@ -604,6 +604,272 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         note = payload.notes or f"Rejected {approval_id}"
         return resume_run(payload.run_id, ResumeRequest(action="reject", notes=note))
 
+    # ── LLM Provider Configuration ──────────────────────────────────────────
+
+    PROVIDERS_CATALOG: list[dict[str, Any]] = [
+        {
+            "id": "zen",
+            "name": "OpenCode Zen",
+            "type": "openai_compat",
+            "base_url": "https://opencode.ai/zen/v1",
+            "auth_type": "api_key",
+            "env_var": "OPENCODE_ZEN_API_KEY",
+            "models": [
+                {"id": "big-pickle", "name": "Big Pickle", "context_window": 131072, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "glm-4.7-free", "name": "GLM 4.7", "context_window": 131072, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "kimi-k2.5-free", "name": "Kimi K2.5", "context_window": 131072, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "minimax-m2.1-free", "name": "MiniMax M2.1", "context_window": 131072, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "gpt-5-nano", "name": "GPT 5 Nano", "context_window": 128000, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "minimax-m2.5", "name": "MiniMax M2.5", "context_window": 131072, "tier": "balanced", "capabilities": ["chat", "completion"]},
+                {"id": "glm-5.1", "name": "GLM 5.1", "context_window": 131072, "tier": "premium", "capabilities": ["chat", "completion"]},
+            ],
+            "signup_url": "https://opencode.ai/",
+        },
+        {
+            "id": "openrouter",
+            "name": "OpenRouter",
+            "type": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "auth_type": "api_key",
+            "env_var": "OPENROUTER_API_KEY",
+            "models": [
+                {"id": "minimax/minimax-m2.5:free", "name": "MiniMax M2.5 (Free)", "context_window": 131072, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "google/gemma-4-31b-it:free", "name": "Gemma 4 31B (Free)", "context_window": 131072, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "qwen/qwen3-next-80b-a3b-instruct:free", "name": "Qwen3 Next 80B (Free)", "context_window": 131072, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "nvidia/nemotron-3-super-120b-a12b:free", "name": "Nemotron 3 Super 120B (Free)", "context_window": 131072, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "minimax/minimax-m2.5", "name": "MiniMax M2.5 (Paid)", "context_window": 131072, "tier": "balanced", "capabilities": ["chat", "completion"]},
+            ],
+            "signup_url": "https://openrouter.ai/",
+        },
+        {
+            "id": "openai",
+            "name": "OpenAI (OAuth)",
+            "type": "openai_oauth",
+            "base_url": "https://api.openai.com/v1",
+            "auth_type": "oauth",
+            "env_var": "",
+            "auth_file_hint": "~/.local/share/opencode/auth.json",
+            "models": [
+                {"id": "gpt-5.3-codex", "name": "GPT 5.3 Codex", "context_window": 200000, "tier": "premium", "capabilities": ["chat", "completion", "reasoning"]},
+                {"id": "gpt-5.4", "name": "GPT 5.4", "context_window": 1000000, "tier": "premium", "capabilities": ["chat", "completion", "reasoning", "vision"]},
+                {"id": "gpt-4o", "name": "GPT-4o", "context_window": 128000, "tier": "balanced", "capabilities": ["chat", "completion", "vision"]},
+                {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "context_window": 128000, "tier": "economy", "capabilities": ["chat", "completion"]},
+                {"id": "o4-mini", "name": "o4-mini", "context_window": 200000, "tier": "premium", "capabilities": ["chat", "reasoning"]},
+            ],
+            "signup_url": "",
+        },
+        {
+            "id": "openai_apikey",
+            "name": "OpenAI (API Key)",
+            "type": "openai_compat",
+            "base_url": "https://api.openai.com/v1",
+            "auth_type": "api_key",
+            "env_var": "OPENAI_API_KEY",
+            "models": [
+                {"id": "gpt-4o", "name": "GPT-4o", "context_window": 128000, "tier": "balanced", "capabilities": ["chat", "completion", "vision"]},
+                {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "context_window": 128000, "tier": "economy", "capabilities": ["chat", "completion"]},
+                {"id": "o4-mini", "name": "o4-mini", "context_window": 200000, "tier": "premium", "capabilities": ["chat", "reasoning"]},
+            ],
+            "signup_url": "https://platform.openai.com/api-keys",
+        },
+        {
+            "id": "ollama",
+            "name": "Ollama (Local)",
+            "type": "ollama",
+            "base_url": "http://localhost:11434",
+            "auth_type": "none",
+            "env_var": "",
+            "models": [
+                {"id": "qwen2.5:7b", "name": "Qwen 2.5 7B", "context_window": 32768, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "llama3.2:3b", "name": "Llama 3.2 3B", "context_window": 32768, "tier": "free", "capabilities": ["chat", "completion"]},
+                {"id": "gemma3:4b", "name": "Gemma 3 4B", "context_window": 8192, "tier": "free", "capabilities": ["chat", "completion"]},
+            ],
+            "signup_url": "https://ollama.com/",
+        },
+    ]
+
+    def _mask_key(key: str) -> str:
+        if not key:
+            return ""
+        if len(key) <= 8:
+            return key[:2] + "***"
+        return key[:6] + "***" + key[-4:]
+
+    def _resolve_env(value: str) -> str:
+        """Resolve ${ENV_VAR} patterns in config values."""
+        import re
+        pattern = re.compile(r"\$\{([^}]+)\}")
+        def replacer(m):
+            return os.environ.get(m.group(1), "")
+        return pattern.sub(replacer, value)
+
+    def _load_providers_yaml() -> dict[str, Any]:
+        """Load the providers.yaml file and return its content."""
+        config_dir = config.config_dir
+        if not config_dir:
+            return {}
+        providers_path = config_dir / "providers.yaml"
+        if not providers_path.exists():
+            return {}
+        import yaml as _yaml
+        return _yaml.safe_load(providers_path.read_text()) or {}
+
+    def _save_providers_yaml(data: dict[str, Any]) -> Path:
+        """Save the providers.yaml file."""
+        import yaml as _yaml
+        config_dir = config.config_dir
+        if not config_dir:
+            config_dir = REPO_ROOT / "src" / "synto" / "config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config.config_dir = config_dir
+        providers_path = config_dir / "providers.yaml"
+        providers_path.write_text(_yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        return providers_path
+
+    @app.get("/api/llm/providers")
+    def llm_list_providers() -> dict[str, Any]:
+        """List all known LLM providers with their models and config status."""
+        providers_yaml = _load_providers_yaml()
+        yaml_providers = providers_yaml.get("providers", {})
+        env_keys = {
+            "OPENCODE_ZEN_API_KEY": os.getenv("OPENCODE_ZEN_API_KEY", ""),
+            "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY", ""),
+            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
+        }
+        result = []
+        for catalog in PROVIDERS_CATALOG:
+            yaml_cfg = yaml_providers.get(catalog["id"], {})
+            api_key = yaml_cfg.get("api_key", "")
+            # Resolve env vars
+            if api_key.startswith("${") and api_key.endswith("}"):
+                env_name = api_key[2:-1]
+                api_key = env_keys.get(env_name, os.getenv(env_name, ""))
+            configured = bool(api_key)
+            if catalog["auth_type"] == "oauth":
+                # Check auth.json existence
+                auth_paths = [
+                    os.path.expanduser("~/.local/share/opencode/auth.json"),
+                    "/mnt/c/Users/agust/.local/share/opencode/auth.json",
+                    "/mnt/c/Users/agust/.config/opencode/auth.json",
+                ]
+                configured = any(os.path.exists(p) for p in auth_paths)
+            elif catalog["auth_type"] == "none":
+                # Ollama: check if running
+                import urllib.request
+                try:
+                    urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+                    configured = True
+                except Exception:
+                    configured = False
+            result.append({
+                **catalog,
+                "configured": configured,
+                "api_key_masked": _mask_key(api_key) if api_key else "",
+                "api_key_raw": api_key,  # For editing
+                "auth_file": yaml_cfg.get("auth_file", yaml_cfg.get("base_url", "")),
+            })
+        return {"providers": result, "count": len(result)}
+
+    @app.put("/api/llm/providers/{provider_id}")
+    def llm_update_provider(provider_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Update a provider's configuration (API key, auth file, etc.)."""
+        catalog = next((p for p in PROVIDERS_CATALOG if p["id"] == provider_id), None)
+        if not catalog:
+            raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
+        providers_yaml = _load_providers_yaml()
+        providers_yaml.setdefault("providers", {})
+        existing = providers_yaml["providers"].get(provider_id, {})
+        # Merge with catalog defaults
+        existing["type"] = catalog["type"]
+        existing["base_url"] = payload.get("base_url", catalog["base_url"])
+        if payload.get("api_key") is not None:
+            existing["api_key"] = payload["api_key"]
+        if payload.get("auth_file") is not None:
+            existing["auth_file"] = payload["auth_file"]
+        if "models" not in existing or payload.get("models"):
+            existing["models"] = catalog["models"]
+        providers_yaml["providers"][provider_id] = existing
+        saved = _save_providers_yaml(providers_yaml)
+        return {"status": "ok", "path": str(saved), "provider": provider_id}
+
+    @app.post("/api/llm/providers/{provider_id}/test")
+    def llm_test_provider(provider_id: str) -> dict[str, Any]:
+        """Test a provider connection."""
+        import urllib.request
+        from synto.config.llm_router import LLMMultiProvider, ProviderConfig, OpenAICompatProvider, OpenAIOAuthProvider, OpenRouterProvider
+        providers_yaml = _load_providers_yaml()
+        yaml_providers = providers_yaml.get("providers", {})
+        cfg = yaml_providers.get(provider_id)
+        if not cfg:
+            catalog = next((p for p in PROVIDERS_CATALOG if p["id"] == provider_id), None)
+            if not catalog:
+                raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
+            cfg = {"type": catalog["type"], "base_url": catalog["base_url"], "api_key": "", "models": catalog["models"]}
+            providers_yaml.setdefault("providers", {})[provider_id] = cfg
+            _save_providers_yaml(providers_yaml)
+        api_key = _resolve_env(cfg.get("api_key", ""))
+        prov_cfg = ProviderConfig(
+            name=provider_id,
+            provider_type=cfg["type"],
+            base_url=_resolve_env(cfg.get("base_url", "")),
+            api_key=api_key if api_key else None,
+        )
+        if cfg["type"] == "openai_oauth":
+            provider = OpenAIOAuthProvider(prov_cfg)
+        elif cfg["type"] == "openrouter":
+            provider = OpenRouterProvider(prov_cfg)
+        else:
+            provider = OpenAICompatProvider(prov_cfg)
+        available = provider.is_available
+        return {
+            "provider": provider_id,
+            "available": available,
+            "models_count": len(prov_cfg.models),
+        }
+
+    @app.get("/api/llm/models")
+    def llm_list_models() -> dict[str, Any]:
+        """List all models across all providers."""
+        all_models = []
+        for catalog in PROVIDERS_CATALOG:
+            for m in catalog["models"]:
+                all_models.append({
+                    "id": m["id"],
+                    "name": m["name"],
+                    "provider": catalog["id"],
+                    "provider_name": catalog["name"],
+                    "context_window": m["context_window"],
+                    "tier": m["tier"],
+                    "capabilities": m["capabilities"],
+                })
+        return {"models": all_models, "count": len(all_models)}
+
+    @app.get("/api/llm/profiles")
+    def llm_list_profiles() -> dict[str, Any]:
+        """List agent profiles and their model assignments from models.yaml."""
+        config_dir = config.config_dir
+        if not config_dir:
+            return {"profiles": {}}
+        models_path = config_dir / "models.yaml"
+        if not models_path.exists():
+            return {"profiles": {}}
+        import yaml as _yaml
+        data = _yaml.safe_load(models_path.read_text()) or {}
+        return {"profiles": data}
+
+    @app.put("/api/llm/profiles")
+    def llm_update_profile(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Update agent profile model assignments."""
+        import yaml as _yaml
+        config_dir = config.config_dir
+        if not config_dir:
+            config_dir = REPO_ROOT / "src" / "synto" / "config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config.config_dir = config_dir
+        models_path = config_dir / "models.yaml"
+        models_path.write_text(_yaml.dump(payload, default_flow_style=False, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        return {"status": "ok", "path": str(models_path)}
+
     return app
 
 
