@@ -237,25 +237,33 @@ Ver: `WEB-INTERFACE-VISION.md`.
 
 ---
 
+## Estado actual
+
+**Todo el plan de implementación (Fases 0-9) está completo.**
+
+| Componente | Estado |
+|---|---|
+| MemoryStore SQLite/FTS5 | ✅ |
+| MemoryContextAgent + MemoryManager | ✅ |
+| Memory MCP Server (14 tools) | ✅ |
+| Obsidian export | ✅ |
+| AgentRegistry (19 agentes) | ✅ |
+| SkillRegistry + SkillLoader dinámico | ✅ |
+| LangGraph runtime (13 fases con gates) | ✅ |
+| LLM Router (múltiples proveedores) | ✅ |
+| Web API + Command Center | ✅ |
+| CLI (`synto run/web/memory/registry`) | ✅ |
+| Tests (105 passing, incluye E2E) | ✅ |
+
 ## Próximo paso recomendado
 
-Después de revisar la documentación:
+El motor está completo. Las siguientes mejoras son opcionales:
 
-1. tomar `DOCUMENTATION-AUDIT.md` como checklist de cierre documental;
-2. seguir `IMPLEMENTATION-PLAN.md` como roadmap operativo;
-3. arrancar por el MVP memory-first:
-   - scaffolding + tests;
-   - MemoryStore SQLite/FTS5;
-   - Memory MCP/tool layer;
-   - MemoryContextAgent;
-   - MemoryManager básico;
-   - integración con SharedState mock;
-4. después implementar el motor mínimo:
-   - AgentRegistry loader;
-   - SkillRegistry scanner;
-   - SharedState models completos;
-   - LangGraph runtime;
-   - primer workflow mock end-to-end.
+1. **LLM providers reales**: Configurar `SYNTO_CONFIG_DIR` con `providers.yaml` y conectar API keys reales para ejecutar workflows con LLMs de verdad (hoy los agentes usan mocks en tests).
+2. **Agentes con tools reales**: Conectar los agentes a herramientas MCP externas (git, filesystem, terminal) para que puedan ejecutar código real.
+3. **Vector embeddings**: Agregar embeddings opcionales al MemoryStore para búsqueda semántica (hoy usa FTS5 keyword search).
+4. **A2A protocol**: Implementar Agent-to-Agent communication para orquestación distribuida.
+5. **Deploy**: Empaquetar como servicio Docker o systemd.
 
 ---
 
