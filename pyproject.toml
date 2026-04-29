@@ -13,6 +13,8 @@ dependencies = [
     "sqlite-fts4>=1.0",
     "mcp>=1.0",
     "fastmcp>=0.4.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.30.0",
     "aiofiles>=24.0",
     "rich>=13.0",
 ]

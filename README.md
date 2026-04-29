@@ -2,7 +2,7 @@
 
 > Sistema de orquestación multi-agente para operar equipos de agentes especializados con SDD, PRD-first, TDD, LangGraph, MCP y Skill Registry dinámico.
 
-Estado actual: **arquitectura documentada, implementación pendiente**.
+Estado actual: **runtime LangGraph + memoria + MCP + CLI + Command Center web local-first implementados**.
 
 ---
 
@@ -172,20 +172,51 @@ Decisión de acceso:
 
 ---
 
-## Interfaz web futura
+## Interfaz web
 
-Sí está contemplada.
+Ya existe una primera versión local-first del **Synto Command Center**.
 
-La UI debería funcionar como un **Hermes Command Center** con:
+Arranque rápido:
+
+```bash
+synto web --port 8787
+# abrir http://127.0.0.1:8787
+```
+
+También se puede ejecutar desde el repo:
+
+```bash
+.venv/bin/python -m synto.cli web --port 8787
+```
+
+Incluye:
 
 - dashboard de runs;
-- timeline de agentes;
-- aprobación de gates;
-- blackboard viewer;
-- skill manager;
-- artifacts center;
-- design system studio;
-- chat lateral con HermesOrchestrator.
+- lanzamiento de workflows;
+- detalle con timeline, eventos y SharedState;
+- centro de aprobación de gates;
+- artifacts viewer;
+- vista del equipo de agentes desde `AGENT-REGISTRY.yaml`;
+- Skill Manager básico;
+- Memory Center básico;
+- Design System Studio inicial;
+- API FastAPI en `/api/*` y documentación en `/docs`.
+
+Endpoints base:
+
+```http
+GET  /api/health
+GET  /api/runs
+POST /api/runs
+GET  /api/runs/{run_id}
+POST /api/runs/{run_id}/resume
+GET  /api/runs/{run_id}/events
+GET  /api/runs/{run_id}/artifacts
+GET  /api/agents
+GET  /api/skills
+GET  /api/memory/search
+GET  /api/memory/candidates
+```
 
 Ver: `WEB-INTERFACE-VISION.md`.
 

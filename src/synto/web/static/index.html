@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Synto Command Center</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <span class="brand-mark">S</span>
+        <div>
+          <strong>Synto</strong>
+          <small>Command Center</small>
+        </div>
+      </div>
+      <nav class="nav" aria-label="Secciones">
+        <button data-section="dashboard" class="active">Dashboard</button>
+        <button data-section="run-detail">Run detail</button>
+        <button data-section="gates">Gates</button>
+        <button data-section="artifacts">Artifacts</button>
+        <button data-section="agents">Agents</button>
+        <button data-section="skills">Skills</button>
+        <button data-section="memory">Memory</button>
+        <button data-section="design-system">Design system</button>
+      </nav>
+      <div class="rail-card">
+        <span class="eyebrow">Local-first</span>
+        <p>Opera el swarm sin SaaS: runtime, memoria, artefactos y aprobaciones desde tu máquina.</p>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">Hermes Command Center</span>
+          <h1>Cabina de operación para tu agent swarm</h1>
+        </div>
+        <div class="topbar-actions">
+          <button id="refreshBtn" class="ghost">Refrescar</button>
+          <a class="ghost" href="/docs" target="_blank" rel="noreferrer">API docs</a>
+        </div>
+      </header>
+
+      <section id="dashboard" class="panel section active-section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Run dashboard</span>
+            <h2>Estado global</h2>
+          </div>
+          <span id="healthBadge" class="badge">Conectando…</span>
+        </div>
+        <div id="metrics" class="metrics"></div>
+        <div class="grid two">
+          <form id="launchForm" class="launch-card">
+            <span class="eyebrow">Nuevo workflow</span>
+            <h3>Mandá una tarea al equipo</h3>
+            <label>Proyecto
+              <input name="project_id" value="synto" autocomplete="off" />
+            </label>
+            <label>Tarea
+              <textarea name="task" rows="5" placeholder="Ej: Crear autenticación por email con tests y docs"></textarea>
+            </label>
+            <div class="form-row">
+              <label>Modo
+                <select name="execution_mode">
+                  <option value="interactive" selected>Interactivo con gates</option>
+                  <option value="automatic">Automático</option>
+                </select>
+              </label>
+              <label class="checkbox-line">
+                <input name="allow_deploy" type="checkbox" /> Permitir deploy
+              </label>
+            </div>
+            <button type="submit" class="primary">Lanzar run</button>
+            <p class="muted">Por defecto autoaprueba discovery y frena en PRD para que puedas revisar.</p>
+          </form>
+          <div>
+            <div class="section-head compact">
+              <h3>Runs recientes</h3>
+              <span id="runCount" class="badge"></span>
+            </div>
+            <div id="runsList" class="stack"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="run-detail" class="panel section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Run detail / Timeline</span>
+            <h2 id="runTitle">Seleccioná un run</h2>
+          </div>
+          <span id="runStatus" class="badge">sin selección</span>
+        </div>
+        <div id="timeline" class="timeline"></div>
+        <div class="grid two">
+          <div class="subpanel">
+            <h3>Eventos</h3>
+            <div id="eventsList" class="event-list"></div>
+          </div>
+          <div class="subpanel">
+            <h3>Blackboard / SharedState</h3>
+            <pre id="stateViewer" class="state-viewer">{}</pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="gates" class="panel section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Gate Approval Center</span>
+            <h2>Decisiones pendientes</h2>
+          </div>
+          <span id="pendingGateCount" class="badge">0 pendientes</span>
+        </div>
+        <div id="gatesList" class="stack"></div>
+      </section>
+
+      <section id="artifacts" class="panel section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Artifacts Center</span>
+            <h2>Documentos y entregables</h2>
+          </div>
+          <span id="artifactCount" class="badge">0 artifacts</span>
+        </div>
+        <div class="grid two">
+          <div id="artifactList" class="stack"></div>
+          <article class="subpanel artifact-reader">
+            <h3 id="artifactTitle">Preview</h3>
+            <pre id="artifactPreview">Elegí un artifact para verlo.</pre>
+          </article>
+        </div>
+      </section>
+
+      <section id="agents" class="panel section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Agent Team View</span>
+            <h2>Equipo especializado</h2>
+          </div>
+          <input id="agentFilter" class="filter" placeholder="Filtrar agente/capability" />
+        </div>
+        <div id="agentGrid" class="agent-grid"></div>
+      </section>
+
+      <section id="skills" class="panel section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Skill Manager</span>
+            <h2>Skills disponibles</h2>
+          </div>
+          <input id="skillFilter" class="filter" placeholder="Filtrar skill" />
+        </div>
+        <div id="skillGrid" class="skill-grid"></div>
+      </section>
+
+      <section id="memory" class="panel section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Memory Center</span>
+            <h2>Memoria persistente</h2>
+          </div>
+          <span id="memoryStats" class="badge">sin datos</span>
+        </div>
+        <div class="grid two">
+          <div class="subpanel">
+            <h3>Búsqueda</h3>
+            <form id="memorySearchForm" class="inline-form">
+              <input name="project_id" value="synto" placeholder="Proyecto" />
+              <input name="q" placeholder="Buscar memoria" />
+              <button class="ghost" type="submit">Buscar</button>
+            </form>
+            <div id="memoryResults" class="stack"></div>
+          </div>
+          <div class="subpanel">
+            <h3>Árbol y candidates</h3>
+            <div id="memoryTree" class="tree"></div>
+            <div id="memoryCandidates" class="stack"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="design-system" class="panel section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Design System Studio</span>
+            <h2>Tokens y revisiones visuales</h2>
+          </div>
+          <button id="loadDesignBtn" class="ghost">Cargar diseño del proyecto</button>
+        </div>
+        <pre id="designSystemViewer" class="state-viewer">Esperando proyecto…</pre>
+      </section>
+    </main>
+
+    <aside class="command-panel">
+      <div class="panel mini">
+        <span class="eyebrow">Command panel</span>
+        <h3>Control rápido</h3>
+        <p id="selectedRunHint" class="muted">Sin run seleccionado.</p>
+        <div class="quick-actions">
+          <button id="approveBtn" class="primary small">Aprobar gate</button>
+          <button id="changesBtn" class="ghost small">Pedir cambios</button>
+        </div>
+      </div>
+      <div class="panel mini">
+        <span class="eyebrow">Trace</span>
+        <div id="activityLog" class="activity-log"></div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

@@ -225,6 +225,28 @@ def cmd_registry(args):
 
 
 
+def cmd_web(args):
+    """Run the local Synto Command Center web UI."""
+    import uvicorn
+
+    from synto.web import WebConfig, create_app
+
+    config = WebConfig.from_env(
+        workspace_dir=args.workspace,
+        projects_root=args.projects_root,
+        memory_db_path=args.memory_db,
+        registry_path=args.registry,
+        config_dir=args.config_dir,
+        skills_dirs=args.skills_dir or None,
+    )
+    app = create_app(config)
+    print(f"  Synto Command Center: http://{args.host}:{args.port}")
+    print(f"  Projects root: {config.projects_root}")
+    print(f"  Memory DB: {config.memory_db_path}")
+    uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
+
+
+
 def main():
     parser = argparse.ArgumentParser("synto", description="Multi-agent AI orchestration system")
     sub = parser.add_subparsers(dest="command")
@@ -266,6 +288,19 @@ def main():
     p_reg.add_argument("--registry", default="", help="Path to AGENT-REGISTRY.yaml")
     p_reg.add_argument("--phase", default="", help="Filter registry by phase")
     p_reg.set_defaults(func=cmd_registry)
+
+    # web
+    p_web = sub.add_parser("web", help="Run the local Command Center web UI")
+    p_web.add_argument("--host", default="127.0.0.1", help="Host to bind")
+    p_web.add_argument("--port", type=int, default=8787, help="Port to bind")
+    p_web.add_argument("--workspace", default="", help="Workspace/repo directory")
+    p_web.add_argument("--projects-root", default="", help="Directory with .synto-state project roots")
+    p_web.add_argument("--memory-db", default="", help="Memory database path")
+    p_web.add_argument("--registry", default="", help="Path to AGENT-REGISTRY.yaml")
+    p_web.add_argument("--config-dir", default="", help="LLM config directory")
+    p_web.add_argument("--skills-dir", action="append", default=[], help="Skill directory; can be repeated")
+    p_web.add_argument("--log-level", default="info", help="Uvicorn log level")
+    p_web.set_defaults(func=cmd_web)
 
     args = parser.parse_args()
     if not args.command:

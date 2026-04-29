@@ -1,8 +1,8 @@
 # Web Interface Vision — Synto Command Center
 
-> Estado: visión inicial para discutir después de cerrar arquitectura del motor
-> Fecha: 2026-04-28
-> Objetivo: dejar prevista una interfaz web para operar el sistema multi-agente sin depender solo de CLI/Telegram.
+> Estado: MVP local-first implementado sobre FastAPI + frontend estático
+> Fecha: 2026-04-29
+> Objetivo: operar Synto desde una cabina web sin depender solo de CLI/Telegram.
 
 ---
 
