@@ -327,6 +327,54 @@ async function loadDesignSystem() {
   logActivity(`Design system cargado para ${project}`);
 }
 
+// ── Tools ──────────────────────────────────────────────────────────────────
+
+state.tools = [];
+
+async function loadTools(category = "") {
+  const url = category ? `/api/tools?category=${encodeURIComponent(category)}` : "/api/tools";
+  const data = await api(url);
+  state.tools = data.tools || [];
+  renderTools(data.categories || {});
+}
+
+function renderTools(categories) {
+  const catIcons = {
+    filesystem: "📁", terminal: "⌨️", git: "🔀", web: "🌐",
+    github: "🐙", code: "💻", process: "⚙️",
+  };
+  const byCategory = {};
+  state.tools.forEach((t) => {
+    (byCategory[t.category] = byCategory[t.category] || []).push(t);
+  });
+
+  let html = "";
+  for (const [cat, tools] of Object.entries(byCategory)) {
+    html += `<h4>${catIcons[cat] || "🔧"} ${escapeHtml(cat)} (${tools.length})</h4>`;
+    html += `<div class="tool-grid">${tools.map((t) => `
+      <article class="tool-card">
+        <h5><code>${escapeHtml(t.name)}</code></h5>
+        <p>${escapeHtml(t.description)}</p>
+        <details>
+          <summary class="muted">Parámetros</summary>
+          <table class="mini-table">
+            <tbody>${Object.entries(t.parameters || {}).map(([name, spec]) => `
+              <tr><td><code>${escapeHtml(name)}</code></td><td>${escapeHtml(spec.type || "string")}</td><td>${escapeHtml(spec.description || "")}</td></tr>
+            `).join("")}</tbody>
+          </table>
+        </details>
+      </article>
+    `).join("")}</div>`;
+  }
+  $("#toolsList").innerHTML = html || `<p class="muted">Sin herramientas.</p>`;
+}
+
+async function refreshTools() {
+  const activeBtn = document.querySelector(".tool-cat-btn.active");
+  const cat = activeBtn ? activeBtn.dataset.cat : "";
+  await loadTools(cat);
+}
+
 // ── LLM Providers ──────────────────────────────────────────────────────────
 
 state.providers = [];
@@ -568,6 +616,12 @@ function bindEvents() {
   $("#refreshProvidersBtn").addEventListener("click", refreshLLMData);
   $("#modelFilter").addEventListener("input", renderAllModels);
   $("#saveProfilesBtn").addEventListener("click", saveProfiles);
+  $("#refreshToolsBtn").addEventListener("click", refreshTools);
+  $$(".tool-cat-btn").forEach((btn) => btn.addEventListener("click", () => {
+    $$(".tool-cat-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    loadTools(btn.dataset.cat);
+  }));
 }
 
 bindEvents();

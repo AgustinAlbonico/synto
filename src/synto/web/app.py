@@ -870,6 +870,18 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         models_path.write_text(_yaml.dump(payload, default_flow_style=False, sort_keys=False, allow_unicode=True), encoding="utf-8")
         return {"status": "ok", "path": str(models_path)}
 
+    # ── Tools API ──────────────────────────────────────────────────────
+
+    @app.get("/api/tools")
+    def list_tools_endpoint(category: str | None = None) -> dict[str, Any]:
+        """List all available agent tools."""
+        from synto.tools.tool_layer import list_tools
+        tools = list_tools(categories=[category] if category else None)
+        categories = {}
+        for t in tools:
+            categories.setdefault(t["category"], []).append(t)
+        return {"tools": tools, "categories": {k: len(v) for k, v in categories.items()}, "total": len(tools)}
+
     return app
 
 

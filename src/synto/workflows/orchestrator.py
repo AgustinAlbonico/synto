@@ -500,17 +500,45 @@ def _invoke_agent(state: OrchestratorState, agent_name: str, prompt: str) -> tup
         agent.skill_context = ""
         skill_errors.append(f"{agent_name} skill injection: {exc}")
 
+    # Build tool definitions for this agent
+    tool_definitions = _get_agent_tool_definitions(agent_name, agent_def)
+    tool_config = _get_agent_tool_config(agent_name, agent_def)
+
     try:
-        result = agent.generate(prompt)
-        metadata = {
-            "agent": agent_name,
-            "provider": result.provider,
-            "model": result.model,
-            "fallback": False,
-            "skills_loaded": skill_names,
-            "skills_skipped": skill_skipped,
-        }
-        return result.output, metadata, skill_errors
+        if tool_definitions:
+            # Tool calling loop enabled
+            from synto.tools.tool_calling import tool_calling_loop
+            tc_result = tool_calling_loop(
+                llm_generate=lambda p: _generate_one(agent, p),
+                initial_prompt=prompt,
+                tool_definitions=tool_definitions,
+                config=tool_config,
+            )
+            metadata = {
+                "agent": agent_name,
+                "provider": tc_result.final_content,
+                "model": tc_result.final_content,
+                "fallback": False,
+                "skills_loaded": skill_names,
+                "skills_skipped": skill_skipped,
+                "tool_calls": tc_result.tool_calls_made,
+                "tool_iterations": tc_result.iterations,
+            }
+            return tc_result.final_content, metadata, skill_errors
+        else:
+            # No tools — direct generation
+            result = agent.generate(prompt)
+            metadata = {
+                "agent": agent_name,
+                "provider": result.provider,
+                "model": result.model,
+                "fallback": False,
+                "skills_loaded": skill_names,
+                "skills_skipped": skill_skipped,
+                "tool_calls": 0,
+                "tool_iterations": 0,
+            }
+            return result.output, metadata, skill_errors
     except Exception as exc:  # pragma: no cover - defensive runtime fallback
         fallback = f"[fallback:{agent_name}] {prompt[:500]}"
         return fallback, {
@@ -520,7 +548,52 @@ def _invoke_agent(state: OrchestratorState, agent_name: str, prompt: str) -> tup
             "fallback": True,
             "skills_loaded": skill_names,
             "skills_skipped": skill_skipped,
+            "tool_calls": 0,
+            "tool_iterations": 0,
         }, skill_errors + [f"{agent_name}: {exc}"]
+
+
+def _generate_one(agent, prompt: str) -> tuple[str, dict[str, Any]]:
+    """Wrapper para tool_calling_loop — genera una respuesta del LLM."""
+    result = agent.generate(prompt)
+    return result.output, {"provider": result.provider, "model": result.model}
+
+
+def _get_agent_tool_definitions(agent_name: str, agent_def: dict) -> list[dict]:
+    """Obtener tool definitions para un agente específico."""
+    from synto.tools.tool_calling import get_tool_definitions
+
+    # Check agent definition for tool config
+    allowed = agent_def.get("allowed_tools", [])
+    denied = agent_def.get("denied_tools", [])
+
+    # If no tool config in agent_def, check global config
+    if not allowed and not denied:
+        # Default: give all tools to implementation agents
+        impl_agents = {
+            "BackendImplementer", "FrontendImplementer", "Builder",
+            "Tester", "Reviewer", "SecurityReviewer", "TechnicalWriter",
+            "ReleaseManager", "CodebaseExplorer", "DependencyChecker",
+        }
+        if agent_name in impl_agents:
+            allowed = []  # all tools
+        else:
+            return []  # no tools for planner/analyst/etc.
+
+    return get_tool_definitions(allowed=allowed or None, denied=denied or None)
+
+
+def _get_agent_tool_config(agent_name: str, agent_def: dict):
+    """Obtener configuración de tool calling para un agente."""
+    from synto.tools.tool_calling import ToolCallingConfig
+
+    max_iterations = agent_def.get("tool_max_iterations", 20)
+    return ToolCallingConfig(
+        enabled=True,
+        max_iterations=max_iterations,
+        allowed_tools=agent_def.get("allowed_tools", []),
+        denied_tools=agent_def.get("denied_tools", []),
+    )
 
 
 def _write_agent_slot_and_drafts(

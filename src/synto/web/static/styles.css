@@ -351,3 +351,36 @@ input:focus, textarea:focus, select:focus { border-color: rgba(185, 111, 60, .7)
 #profilesEditor input {
   max-width: 340px;
 }
+
+/* ── Agent Tools ────────────────────────────────────────────────────────── */
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.tool-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255,255,255,.4);
+  padding: 12px;
+}
+.tool-card h5 { margin: 0 0 6px; }
+.tool-card h5 code {
+  font-family: var(--mono);
+  font-size: .85rem;
+  background: rgba(0,0,0,.06);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.tool-card p {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+  font-size: .88rem;
+}
+.tool-cat-btn.active {
+  background: rgba(185,111,60,.22);
+  border-color: rgba(185,111,60,.4);
+  color: var(--oxide);
+}
