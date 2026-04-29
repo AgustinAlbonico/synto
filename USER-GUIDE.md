@@ -601,10 +601,15 @@ poetry run pytest -v
 
 Funcionalidades que se van agregando:
 
-- [ ] MemoryManager completo (consolidación, deduplicación, redacción de secretos).
+- [x] MemoryManager completo (consolidación, deduplicación, redacción de secretos). ✅
+- [x] SQLite + FTS5 con jerarquía Project → Feature → Topic. ✅
+- [x] MCP Server con 14 herramientas (search, get_item, get_tree, build_pack, candidates, forget, etc.). ✅
+- [x] CLI completa para memoria (init, add, search, stats, list, tree, export, build-pack, candidates, commit/reject, forget, audit). ✅
+- [x] Obsidian export. ✅
+- [x] Secret redaction. ✅
+- [x] Ranking heurístico por importancia/confidencia/antigüedad. ✅
 - [ ] Embeddings opcionales para memoria semántica.
-- [ ] Export automático a Obsidian vault (ya está preparado).
-- [ ] Skill inbox / quarantine para validación de skills externas.
+- [ ] Skill inbox / quarantine para validación de skills externas (parcial: quarantine implementado en SkillRegistry).
 - [ ] Workflow completo end-to-end con LangGraph runtime real.
 - [ ] Integration con Telegram para notificaciones.
 - [ ] A2A protocol para comunicar con agentes externos.
