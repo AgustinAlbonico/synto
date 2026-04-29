@@ -187,6 +187,45 @@ Decisión de acceso:
 
 ---
 
+## Herramientas de Agentes (Tools)
+
+Los agentes de Synto tienen acceso a **37 herramientas** en 8 categorías para trabajar de forma 100% autónoma:
+
+| Categoría | Herramientas |
+|---|---|
+| **Filesystem** | `read_file`, `write_file`, `create_directory`, `list_directory`, `search_files`, `move_file`, `delete_file`, `get_file_info` |
+| **Terminal** | `terminal` (ejecuta cualquier comando shell) |
+| **Git** | `git_status`, `git_diff`, `git_log`, `git_branch`, `git_checkout`, `git_commit`, `git_push`, `git_clone` |
+| **Web** | `web_search`, `web_extract` |
+| **GitHub** | `github_search_code`, `github_search_issues`, `github_get_file_contents`, `github_create_issue`, `github_create_pull_request` |
+| **Code** | `patch` (find-and-replace en archivos) |
+| **Process** | `process_start`, `process_poll`, `process_kill`, `process_list` |
+| **Memory** | `memory_search`, `memory_build_pack`, `memory_add_candidate`, etc. |
+
+### Tool calling loop
+
+Los agentes de implementación (BackendImplementer, FrontendImplementer, Builder, Tester, Reviewer, etc.) tienen herramientas habilitadas por defecto. El LLM puede:
+
+1. Recibir tool definitions en su prompt
+2. Responder con tool calls en formato JSON
+3. Ejecutar las herramientas y obtener resultados
+4. Continuar trabajando con los resultados
+5. Repetir hasta completar la tarea (máx 20 iteraciones)
+
+### MCP Server
+
+Todas las herramientas están expuestas como MCP server:
+
+```bash
+# Via stdio (para conectar con clientes MCP)
+.venv/bin/python -m synto.tools.mcp_server
+
+# Via HTTP
+.venv/bin/python -m synto.tools.mcp_server --transport sse --port 8765
+```
+
+---
+
 ## Interfaz web
 
 Ya existe una primera versión local-first del **Synto Command Center**.
@@ -231,6 +270,10 @@ GET  /api/agents
 GET  /api/skills
 GET  /api/memory/search
 GET  /api/memory/candidates
+GET  /api/llm/providers
+GET  /api/llm/models
+GET  /api/llm/profiles
+GET  /api/tools
 ```
 
 Ver: `WEB-INTERFACE-VISION.md`.
@@ -252,18 +295,21 @@ Ver: `WEB-INTERFACE-VISION.md`.
 | LangGraph runtime (13 fases con gates) | ✅ |
 | LLM Router (múltiples proveedores) | ✅ |
 | Web API + Command Center | ✅ |
+| LLM Provider Manager (UI) | ✅ |
+| Agent Tools (37 tools, 8 categorías) | ✅ |
+| Tool calling loop autónomo | ✅ |
 | CLI (`synto run/web/memory/registry`) | ✅ |
-| Tests (105 passing, incluye E2E) | ✅ |
+| Tests (150 passing, incluye E2E) | ✅ |
 
 ## Próximo paso recomendado
 
-El motor está completo. Las siguientes mejoras son opcionales:
+El motor está completo con herramientas autónomas. Las siguientes mejoras son opcionales:
 
-1. **LLM providers reales**: Configurar `SYNTO_CONFIG_DIR` con `providers.yaml` y conectar API keys reales para ejecutar workflows con LLMs de verdad (hoy los agentes usan mocks en tests).
-2. **Agentes con tools reales**: Conectar los agentes a herramientas MCP externas (git, filesystem, terminal) para que puedan ejecutar código real.
-3. **Vector embeddings**: Agregar embeddings opcionales al MemoryStore para búsqueda semántica (hoy usa FTS5 keyword search).
-4. **A2A protocol**: Implementar Agent-to-Agent communication para orquestación distribuida.
-5. **Deploy**: Empaquetar como servicio Docker o systemd.
+1. **Ejecución real end-to-end**: Configurar API keys reales en la UI de LLM Providers y ejecutar un workflow completo con LLMs de verdad. Los agentes ya tienen todas las herramientas (filesystem, terminal, git, web, github) — solo falta el LLM real.
+2. **Vector embeddings**: Agregar embeddings opcionales al MemoryStore para búsqueda semántica (hoy usa FTS5 keyword search).
+3. **A2A protocol**: Implementar Agent-to-Agent communication para orquestación distribuida.
+4. **Deploy**: Empaquetar como servicio Docker o systemd.
+5. **Agentes de dominio adicionales**: Equipos para análisis de negocio, research, data science, etc.
 
 ---
 
