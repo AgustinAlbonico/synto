@@ -2,7 +2,7 @@
 
 > Estado: investigación y decisión recomendada
 > Fecha: 2026-04-28
-> Contexto: comparación entre Engram, Obsidian-first memory, vector DB, graph/tree memory y MCP memory servers para `hermes-orchestrator`.
+> Contexto: comparación entre Engram, Obsidian-first memory, vector DB, graph/tree memory y MCP memory servers para `synto`.
 
 ---
 
@@ -553,7 +553,7 @@ Regla:
 
 ---
 
-## 7. Diseño recomendado para Hermes Orchestrator
+## 7. Diseño recomendado para Synto
 
 Recomendación: construir una memoria híbrida propia, inspirada en Engram y Basic Memory.
 
@@ -681,7 +681,7 @@ memory_nodes(
 Ejemplo de `path`:
 
 ```text
-project:hermes-orchestrator/feature:persistent-memory/topic:engram-research
+project:synto/feature:persistent-memory/topic:engram-research
 ```
 
 ### 8.3 memory_items
@@ -772,8 +772,8 @@ Cada memoria importante debería poder renderizarse como Markdown/JSON.
 
 ```yaml
 id: mem_...
-project_id: hermes-orchestrator
-path: project/hermes-orchestrator/feature/persistent-memory/topic/engram-research
+project_id: synto
+path: project/synto/feature/persistent-memory/topic/engram-research
 kind: bug_resolution | decision | convention | feature_context | artifact_summary | session_summary | risk | preference | skill_candidate
 title: "..."
 summary: "Resumen de 1-2 líneas"
@@ -956,7 +956,7 @@ Opción E: Hybrid Hermes Project Memory
 
 ## 12. Decisión recomendada
 
-Para `hermes-orchestrator` conviene implementar:
+Para `synto` conviene implementar:
 
 ```text
 Hybrid Hermes Project Memory

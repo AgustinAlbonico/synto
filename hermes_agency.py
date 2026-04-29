@@ -41,7 +41,7 @@ from pydantic import BaseModel, Field
 # CONFIGURACIÓN
 # ============================================================================
 
-WORKSPACE_DIR = Path(os.getenv("HERMES_STATE_DIR", "/home/agust/hermes-orchestrator/workspace/.hermes-state"))
+WORKSPACE_DIR = Path(os.getenv("HERMES_STATE_DIR", "/home/agust/synto/workspace/.hermes-state"))
 OPENCODE_CMD = os.getenv("OPENCODE_CMD", "opencode")
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
@@ -297,7 +297,7 @@ def generar_task_graph(context_id: str, tareas: str) -> str:
 # CAPA 0: HERMES ORCHESTRATOR
 # ============================================================================
 
-hermes_orchestrator = Agent(
+synto = Agent(
     name="HermesOrchestrator",
     description="Tu punto de contacto único. Te escucha, hace preguntas, activa dominios.",
     instructions="""
@@ -1108,16 +1108,16 @@ Sos el ContextManager. Gestionás el estado entre sesiones.
 print("Creando la Agencia Hermes con todos los flujos de comunicación...")
 
 agency = Agency(
-    hermes_orchestrator,
+    synto,
     communication_flows=[
         # Capa 0 -> Capa 1
-        hermes_orchestrator > code_orchestrator,
-        hermes_orchestrator > research_orchestrator,
-        hermes_orchestrator > content_orchestrator,
-        hermes_orchestrator > devops_orchestrator,
-        hermes_orchestrator > data_orchestrator,
-        hermes_orchestrator > business_orchestrator,
-        hermes_orchestrator > ux_orchestrator,
+        synto > code_orchestrator,
+        synto > research_orchestrator,
+        synto > content_orchestrator,
+        synto > devops_orchestrator,
+        synto > data_orchestrator,
+        synto > business_orchestrator,
+        synto > ux_orchestrator,
         
         # Capa 1 Code -> Capa 2 Code
         code_orchestrator > planner,
@@ -1197,7 +1197,7 @@ async def main():
     print("\nEjemplo de uso:")
     print("   response = await agency.get_response(")
     print("       message='Quiero agregar autenticación JWT al sistema odontológico',")
-    print("       recipient_agent=hermes_orchestrator")
+    print("       recipient_agent=synto")
     print("   )")
     print("\nPara la TUI interactiva:")
     print("   agency.tui()")

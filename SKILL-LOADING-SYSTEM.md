@@ -51,11 +51,11 @@ Skill discovery → metadata registry → agent allowlist → trigger matching �
 ~/.hermes/skills-inbox/
   Skills recién descargadas, todavía no confiables.
 
-/home/agust/hermes-orchestrator/config/
+/home/agust/synto/config/
   agent-skill-map.yaml       # overrides/assignments del proyecto
   skill-registry-cache.json  # cache generado, no editar a mano
 
-/home/agust/hermes-orchestrator/workspace/.hermes-state/
+/home/agust/synto/workspace/.hermes-state/
   skill-load-events.jsonl    # auditoría de cargas
 ```
 

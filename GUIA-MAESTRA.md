@@ -1,7 +1,7 @@
 # Guía Maestra — Sistema de Orquestación Multi-Capa para Hermes
 
 > **Versión:** 1.0.0  
-> **Autor:** Agustín Albonico + Hermes Orchestrator  
+> **Autor:** Agustín Albonico + Synto  
 > **Propósito:** Documento único de referencia para reconstruir el sistema si se pierde contexto. Cada fase, cada agente, cada skill, cada decisión de diseño está acá.  
 > **Regla de oro:** Si no está en esta guía, no existe todavía.
 
@@ -544,7 +544,7 @@ Usuario dice: "Quiero X"
 
 ### Ubicación
 ```
-/home/agust/hermes-orchestrator/workspace/.hermes-state/
+/home/agust/synto/workspace/.hermes-state/
 ├── README.md
 └── {context_id}/
     ├── discovery.md

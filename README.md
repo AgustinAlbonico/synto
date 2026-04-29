@@ -1,4 +1,4 @@
-# Hermes Orchestrator
+# Synto
 
 > Sistema de orquestación multi-agente para operar equipos de agentes especializados con SDD, PRD-first, TDD, LangGraph, MCP y Skill Registry dinámico.
 

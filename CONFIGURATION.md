@@ -4,7 +4,7 @@
 
 ```bash
 # Directorio base del orquestador
-export HERMES_ORCHESTRATOR_HOME=/home/agust/hermes-orchestrator
+export HERMES_ORCHESTRATOR_HOME=/home/agust/synto
 
 # Directorio de proyectos
 export HERMES_PROJECTS_DIR=/mnt/c/Users/agust/Desktop/projects

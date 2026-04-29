@@ -73,7 +73,7 @@ Hechos estables y reutilizables.
 
 Ejemplos:
 
-- “hermes-orchestrator usa LangGraph como runtime.”
+- “synto usa LangGraph como runtime.”
 - “A2A queda futuro/opcional, no dependencia del MVP.”
 - “El usuario prefiere español rioplatense.”
 - “El sistema odontológico es monorepo pnpm/turbo.”

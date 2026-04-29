@@ -1,4 +1,4 @@
-# Web Interface Vision — Hermes Orchestrator Command Center
+# Web Interface Vision — Synto Command Center
 
 > Estado: visión inicial para discutir después de cerrar arquitectura del motor
 > Fecha: 2026-04-28
@@ -8,7 +8,7 @@
 
 ## 1. Decisión
 
-Sí, es posible crear una interfaz web para usar Hermes Orchestrator.
+Sí, es posible crear una interfaz web para usar Synto.
 
 Pero el orden correcto es:
 

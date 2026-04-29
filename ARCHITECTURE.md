@@ -1,4 +1,4 @@
-# Arquitectura del Sistema Hermes Orchestrator
+# Arquitectura del Sistema Synto
 
 ## Visión general
 

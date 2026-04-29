@@ -1,8 +1,8 @@
-# Hermes Orchestrator Implementation Plan
+# Synto Implementation Plan
 
 > **For Hermes:** Use `subagent-driven-development` to implement this plan task-by-task when execution starts.
 
-**Goal:** construir el primer MVP funcional de `hermes-orchestrator` sin perder contexto, arrancando por la memoria persistente y su capa MCP antes de implementar el swarm completo.
+**Goal:** construir el primer MVP funcional de `synto` sin perder contexto, arrancando por la memoria persistente y su capa MCP antes de implementar el swarm completo.
 
 **Architecture:** implementación memory-first sobre Python, con `MemoryStore` SQLite/FTS5, una capa determinística `Memory MCP Server`/tool layer, `MemoryContextAgent` liviano para memory packs, `MemoryManager` para consolidación y luego integración con `SharedState` y LangGraph.
 
@@ -100,11 +100,11 @@ git add .gitignore README.md *.md AGENT-REGISTRY.yaml config/agent-skill-map.yam
 **Objective:** separar código nuevo del prototipo legacy `hermes_agency.py`.
 
 **Files:**
-- Create: `src/hermes_orchestrator/__init__.py`
-- Create: `src/hermes_orchestrator/memory/__init__.py`
-- Create: `src/hermes_orchestrator/mcp/__init__.py`
-- Create: `src/hermes_orchestrator/shared_state/__init__.py`
-- Create: `src/hermes_orchestrator/registry/__init__.py`
+- Create: `src/synto/__init__.py`
+- Create: `src/synto/memory/__init__.py`
+- Create: `src/synto/mcp/__init__.py`
+- Create: `src/synto/shared_state/__init__.py`
+- Create: `src/synto/registry/__init__.py`
 - Create: `tests/__init__.py`
 
 **Steps:**
@@ -114,7 +114,7 @@ git add .gitignore README.md *.md AGENT-REGISTRY.yaml config/agent-skill-map.yam
 3. Verificar import básico:
 
 ```bash
-python -c "import hermes_orchestrator; print('ok')"
+python -c "import synto; print('ok')"
 ```
 
 Expected:
@@ -136,7 +136,7 @@ ok
 
 ```toml
 [project]
-name = "hermes-orchestrator"
+name = "synto"
 version = "0.1.0"
 description = "Multi-agent orchestration runtime with persistent memory"
 requires-python = ">=3.12"
@@ -184,7 +184,7 @@ no tests ran
 **Objective:** definir los contratos de datos antes de tocar SQLite.
 
 **Files:**
-- Create: `src/hermes_orchestrator/memory/models.py`
+- Create: `src/synto/memory/models.py`
 - Create: `tests/memory/test_models.py`
 
 **Modelos mínimos:**
@@ -224,8 +224,8 @@ Expected:
 **Objective:** crear la estructura durable del `MemoryStore`.
 
 **Files:**
-- Create: `src/hermes_orchestrator/memory/schema.sql`
-- Create: `src/hermes_orchestrator/memory/store.py`
+- Create: `src/synto/memory/schema.sql`
+- Create: `src/synto/memory/store.py`
 - Create: `tests/memory/test_schema.py`
 
 **Tablas MVP:**
@@ -270,7 +270,7 @@ Expected:
 **Objective:** poder crear proyecto, feature, topic y memory item.
 
 **Files:**
-- Modify: `src/hermes_orchestrator/memory/store.py`
+- Modify: `src/synto/memory/store.py`
 - Create: `tests/memory/test_store_crud.py`
 
 **API mínima:**
@@ -305,7 +305,7 @@ python -m pytest tests/memory/test_store_crud.py -q
 **Objective:** recuperar memorias relevantes por texto.
 
 **Files:**
-- Modify: `src/hermes_orchestrator/memory/store.py`
+- Modify: `src/synto/memory/store.py`
 - Create: `tests/memory/test_search.py`
 
 **API mínima:**
@@ -329,7 +329,7 @@ def search(self, query: str, project_id: str | None = None, limit: int = 10) -> 
 **Objective:** evitar guardar credenciales o tokens.
 
 **Files:**
-- Create: `src/hermes_orchestrator/memory/redaction.py`
+- Create: `src/synto/memory/redaction.py`
 - Create: `tests/memory/test_redaction.py`
 
 **Debe redactar:**
@@ -353,7 +353,7 @@ def search(self, query: str, project_id: str | None = None, limit: int = 10) -> 
 **Objective:** ordenar resultados según relevancia inicial sin embeddings.
 
 **Files:**
-- Create: `src/hermes_orchestrator/memory/ranking.py`
+- Create: `src/synto/memory/ranking.py`
 - Create: `tests/memory/test_ranking.py`
 
 **Score inicial:**
@@ -377,7 +377,7 @@ score = keyword_match
 **Objective:** transformar resultados en paquetes chicos por agente.
 
 **Files:**
-- Create: `src/hermes_orchestrator/memory/pack_builder.py`
+- Create: `src/synto/memory/pack_builder.py`
 - Create: `tests/memory/test_pack_builder.py`
 
 **API mínima:**
@@ -404,7 +404,7 @@ class MemoryPackBuilder:
 **Objective:** exponer operaciones como funciones seguras antes de envolverlas como MCP.
 
 **Files:**
-- Create: `src/hermes_orchestrator/mcp/memory_tools.py`
+- Create: `src/synto/mcp/memory_tools.py`
 - Create: `tests/mcp/test_memory_tools.py`
 
 **Tools iniciales:**
@@ -431,7 +431,7 @@ memory.forget
 **Objective:** permitir que otros agentes/clientes llamen tools de memoria vía MCP.
 
 **Files:**
-- Create: `src/hermes_orchestrator/mcp/memory_server.py`
+- Create: `src/synto/mcp/memory_server.py`
 - Create: `tests/mcp/test_memory_server_contract.py`
 
 **Verify:**
@@ -450,7 +450,7 @@ memory.forget
 **Objective:** construir contexto por agente al inicio de un run.
 
 **Files:**
-- Create: `src/hermes_orchestrator/memory/context_agent.py`
+- Create: `src/synto/memory/context_agent.py`
 - Create: `tests/memory/test_context_agent.py`
 
 **API mínima:**
@@ -475,7 +475,7 @@ class MemoryContextAgent:
 **Objective:** consolidar candidatos al final de un run.
 
 **Files:**
-- Create: `src/hermes_orchestrator/memory/manager.py`
+- Create: `src/synto/memory/manager.py`
 - Create: `tests/memory/test_manager.py`
 
 **API mínima:**
@@ -503,7 +503,7 @@ class MemoryManager:
 **Objective:** poder pasar memory packs a agentes mock sin tener LangGraph todavía.
 
 **Files:**
-- Create: `src/hermes_orchestrator/shared_state/models.py`
+- Create: `src/synto/shared_state/models.py`
 - Create: `tests/shared_state/test_models.py`
 
 **Campos mínimos:**
@@ -526,7 +526,7 @@ artifacts
 **Objective:** demostrar que la memoria ya sirve antes del swarm completo.
 
 **Files:**
-- Create: `src/hermes_orchestrator/workflows/memory_first_mock.py`
+- Create: `src/synto/workflows/memory_first_mock.py`
 - Create: `tests/workflows/test_memory_first_mock.py`
 
 **Flow:**
@@ -562,7 +562,7 @@ Expected:
 **Objective:** leer y validar `AGENT-REGISTRY.yaml`.
 
 **Files:**
-- Create: `src/hermes_orchestrator/registry/agent_registry.py`
+- Create: `src/synto/registry/agent_registry.py`
 - Create: `tests/registry/test_agent_registry.py`
 
 **Debe validar:**
@@ -581,7 +581,7 @@ Expected:
 **Objective:** descubrir skills disponibles sin cargarlas completas.
 
 **Files:**
-- Create: `src/hermes_orchestrator/registry/skill_registry.py`
+- Create: `src/synto/registry/skill_registry.py`
 - Create: `tests/registry/test_skill_registry.py`
 
 **Reglas:**
@@ -600,7 +600,7 @@ Expected:
 **Objective:** ejecutar un workflow mock con nodos reales de orquestación.
 
 **Files:**
-- Create: `src/hermes_orchestrator/runtime/graph.py`
+- Create: `src/synto/runtime/graph.py`
 - Create: `tests/runtime/test_graph.py`
 
 **Nodos iniciales:**
@@ -630,7 +630,7 @@ delivery
 **Objective:** generar espejo humano-readable.
 
 **Files:**
-- Create: `src/hermes_orchestrator/memory/obsidian_export.py`
+- Create: `src/synto/memory/obsidian_export.py`
 - Create: `tests/memory/test_obsidian_export.py`
 
 **No hacer bidireccional todavía.**
@@ -650,17 +650,17 @@ workspace/.hermes-memory/exports/obsidian/{project}/{feature}/{topic}.md
 **Objective:** poder probar sin UI ni swarm completo.
 
 **Files:**
-- Create: `src/hermes_orchestrator/cli.py`
+- Create: `src/synto/cli.py`
 - Modify: `pyproject.toml`
 - Create: `tests/test_cli.py`
 
 **Comandos:**
 
 ```bash
-hermes-orchestrator memory init
-hermes-orchestrator memory add --project sistema-odontologico --kind decision --text "..."
-hermes-orchestrator memory search "turnos utc"
-hermes-orchestrator memory build-pack --agent BackendImplementer --task "..."
+synto memory init
+synto memory add --project sistema-odontologico --kind decision --text "..."
+synto memory search "turnos utc"
+synto memory build-pack --agent BackendImplementer --task "..."
 ```
 
 ---
@@ -682,10 +682,10 @@ all tests passing
 Demo manual esperada:
 
 ```bash
-hermes-orchestrator memory init
-hermes-orchestrator memory add --project sistema-odontologico --kind decision --text "Los turnos no se borran físicamente; se cancelan."
-hermes-orchestrator memory search "turnos borran"
-hermes-orchestrator memory build-pack --agent BackendImplementer --task "Agregar recordatorios WhatsApp a turnos"
+synto memory init
+synto memory add --project sistema-odontologico --kind decision --text "Los turnos no se borran físicamente; se cancelan."
+synto memory search "turnos borran"
+synto memory build-pack --agent BackendImplementer --task "Agregar recordatorios WhatsApp a turnos"
 ```
 
 Debe devolver un memory pack chico, con fuentes y sin traer toda la memoria.
