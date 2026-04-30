@@ -84,6 +84,18 @@ def test_get_agents_by_phase(tmp_path: Path):
     assert len(impl) == 1
 
 
+def test_load_rejects_invalid_prompt_contract(tmp_path: Path):
+    bad = dict(VALID_AGENT)
+    bad["prompt_contract"] = {
+        "identity": "Sos un implementador.",
+        "outputs": ["code_changes"],
+    }
+    path = _write_registry(tmp_path, [bad])
+    reg = AgentRegistry(path)
+    with pytest.raises(ValueError, match="prompt_contract"):
+        reg.load()
+
+
 def test_load_empty_registry(tmp_path: Path):
     f = tmp_path / "empty.yaml"
     f.write_text("agents: []")

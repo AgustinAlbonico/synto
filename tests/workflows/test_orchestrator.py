@@ -5,6 +5,7 @@ import tempfile
 import pytest
 
 from synto.workflows import build_workflow, get_compiled
+from synto.workflows import orchestrator as orchestrator_module
 
 
 @pytest.fixture
@@ -77,6 +78,29 @@ def test_workflow_has_memory_packs(workflow):
     # Memory rehydration should have run
     mem_events = [e for e in result["events"] if "memory" in e.get("type", "")]
     assert len(mem_events) >= 2  # rehydration + consolidation
+
+
+def test_memory_rehydration_uses_registry_agent_ids_without_legacy_factory(monkeypatch, tmp_path):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("memory_rehydration must not instantiate agents through legacy create_all_agents")
+
+    monkeypatch.setattr(orchestrator_module, "create_all_agents", fail_if_called, raising=False)
+    state = {
+        "task": "Build a login API endpoint",
+        "project_id": "proj",
+        "memory_db_path": str(tmp_path / "memory.db"),
+        "state_root": str(tmp_path / "state"),
+        "memory_pack_global": {},
+        "memory_pack_by_agent": {},
+        "shared_state_snapshot": {},
+        "events": [],
+        "errors": [],
+    }
+
+    result = orchestrator_module.memory_rehydration(state)
+
+    assert "Reviewer" in result["memory_pack_by_agent"]
+    assert "MemoryContextAgent" in result["memory_pack_by_agent"]
 
 
 def test_workflow_gate_failure_retry(workflow):

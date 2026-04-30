@@ -125,7 +125,67 @@ class AgentRegistry:
         if writes is not None and not isinstance(writes, list):
             errors.append(f"[{agent_id}] 'writes' must be a list")
 
+        prompt_contract = agent.get("prompt_contract")
+        if prompt_contract is not None:
+            errors.extend(self._validate_prompt_contract(agent_id, prompt_contract))
+
         return errors
+
+    def _validate_prompt_contract(self, agent_id: str, prompt_contract: Any) -> list[str]:
+        errors: list[str] = []
+        if not isinstance(prompt_contract, dict):
+            return [f"[{agent_id}] 'prompt_contract' must be a dict"]
+
+        required_string_fields = ["identity", "mission"]
+        required_list_fields = ["inputs", "outputs", "must_do", "must_not_do", "done_criteria"]
+        optional_list_fields = ["escalation_rules"]
+
+        for field in required_string_fields:
+            value = prompt_contract.get(field)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"[{agent_id}] 'prompt_contract.{field}' must be a non-empty string")
+
+        workflow_position = prompt_contract.get("workflow_position")
+        if workflow_position is not None and (not isinstance(workflow_position, str) or not workflow_position.strip()):
+            errors.append(f"[{agent_id}] 'prompt_contract.workflow_position' must be a non-empty string when present")
+
+        for field in required_list_fields:
+            errors.extend(self._validate_prompt_contract_list(agent_id, prompt_contract, field, required=True))
+
+        for field in optional_list_fields:
+            errors.extend(self._validate_prompt_contract_list(agent_id, prompt_contract, field, required=False))
+
+        response_contract = prompt_contract.get("response_contract")
+        if response_contract is not None:
+            if not isinstance(response_contract, dict):
+                errors.append(f"[{agent_id}] 'prompt_contract.response_contract' must be a dict")
+            else:
+                style = response_contract.get("style")
+                if style is not None and (not isinstance(style, str) or not style.strip()):
+                    errors.append(f"[{agent_id}] 'prompt_contract.response_contract.style' must be a non-empty string when present")
+                format_value = response_contract.get("format")
+                if format_value is not None:
+                    if not isinstance(format_value, list) or not format_value or any(not isinstance(item, str) or not item.strip() for item in format_value):
+                        errors.append(f"[{agent_id}] 'prompt_contract.response_contract.format' must be a non-empty list of strings when present")
+
+        return errors
+
+    def _validate_prompt_contract_list(
+        self,
+        agent_id: str,
+        prompt_contract: dict[str, Any],
+        field: str,
+        *,
+        required: bool,
+    ) -> list[str]:
+        value = prompt_contract.get(field)
+        if value is None:
+            if required:
+                return [f"[{agent_id}] missing 'prompt_contract.{field}'"]
+            return []
+        if not isinstance(value, list) or not value or any(not isinstance(item, str) or not item.strip() for item in value):
+            return [f"[{agent_id}] 'prompt_contract.{field}' must be a non-empty list of strings"]
+        return []
 
     def get_agent(self, agent_id: str) -> Optional[dict[str, Any]]:
         """Get a single agent definition."""

@@ -14,7 +14,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.config import get_config
 from langgraph.types import interrupt
 
-from synto.agents import create_all_agents
+from synto.agents import AgentFactory
 from synto.config.llm_router import LLMMultiProvider
 from synto.memory import (
     MemoryCandidate,
@@ -146,6 +146,7 @@ class OrchestratorState(TypedDict, total=False):
     memory_pack_global: dict[str, Any]
     memory_pack_by_agent: dict[str, Any]
     phase_outputs: dict[str, Any]
+    agent_skills_cache: dict[str, dict[str, Any]]  # agent_name -> {phase, skill_names, skill_context, docs}
     discovery_output: str
     prd_output: str
     plan: str
@@ -231,6 +232,7 @@ def build_initial_state(
         "memory_pack_global": {},
         "memory_pack_by_agent": {},
         "phase_outputs": {},
+        "agent_skills_cache": {},
         "discovery_output": "",
         "prd_output": "",
         "plan": "",
@@ -365,12 +367,16 @@ def _normalized_memory_by_agent(state: OrchestratorState) -> dict[str, dict[str,
 
 def _get_agents(state: OrchestratorState) -> dict[str, Any]:
     router = _get_router(state.get("config_dir", ""))
-    agents = create_all_agents(router=router, memory_by_agent=_normalized_memory_by_agent(state))
-    context = _memory_text(state)
-    if context:
-        for agent in agents.values():
-            agent.memory_context = context
-    return agents
+    shared_memory_context = _memory_text(state)
+    memory_by_agent = _normalized_memory_by_agent(state)
+    factory = AgentFactory(
+        router=router,
+        registry=_get_registry(state.get("registry_path", DEFAULT_REGISTRY_PATH)),
+    )
+    return factory.create_all(
+        memory_by_agent=memory_by_agent,
+        shared_memory_context=shared_memory_context,
+    )
 
 
 def _memory_text(state: OrchestratorState) -> str:
@@ -481,21 +487,45 @@ def _artifact_phase_dir(artifact_id: str, fallback_phase_id: str) -> str:
     return _PHASE_ARTIFACT_DIRS.get(artifact_id, _PHASE_ARTIFACT_DIRS.get(fallback_phase_id, fallback_phase_id))
 
 
-def _invoke_agent(state: OrchestratorState, agent_name: str, prompt: str) -> tuple[str, dict[str, Any], list[str]]:
+def _invoke_agent(
+    state: OrchestratorState,
+    agent_name: str,
+    prompt: str,
+    *,
+    phase_id: str = "",
+) -> tuple[str, dict[str, Any], list[str], dict[str, dict[str, Any]]]:
     agents = _get_agents(state)
     agent = agents[agent_name]
+    agent_def = _get_registry(state.get("registry_path", DEFAULT_REGISTRY_PATH)).get_agent(agent_name) or {"id": agent_name}
+    effective_phase = phase_id or str(state.get("current_phase", "") or "") or "__global__"
+    agent_skills_cache = dict(state.get("agent_skills_cache", {}) or {})
+    cached_skills = agent_skills_cache.get(agent_name) or {}
+
     skill_names: list[str] = []
     skill_skipped: dict[str, str] = {}
     skill_errors: list[str] = []
+    skill_cache_status = "miss"
+
     try:
-        agent_def = _get_registry(state.get("registry_path", DEFAULT_REGISTRY_PATH)).get_agent(agent_name) or {"id": agent_name}
-        skill_state = {**state, "task": "\n\n".join(part for part in [state.get("task", ""), prompt] if part)}
-        resolved_skills = _get_skill_loader(state).resolve(agent_name, agent_def, skill_state)
-        agent.skill_context = resolved_skills.context
-        skill_names = resolved_skills.skill_names
-        skill_skipped = resolved_skills.skipped
-        if resolved_skills.events:
-            _get_state_store(state).append_skill_events(resolved_skills.events)
+        if cached_skills.get("phase") == effective_phase:
+            agent.skill_context = str(cached_skills.get("skill_context", "") or "")
+            skill_names = list(cached_skills.get("skill_names", []) or [])
+            skill_skipped = dict(cached_skills.get("skills_skipped", {}) or {})
+            skill_cache_status = "hit"
+        else:
+            skill_state = {**state, "task": "\n\n".join(part for part in [state.get("task", ""), prompt] if part)}
+            resolved_skills = _get_skill_loader(state).resolve(agent_name, agent_def, skill_state)
+            agent.skill_context = resolved_skills.context
+            skill_names = resolved_skills.skill_names
+            skill_skipped = resolved_skills.skipped
+            agent_skills_cache[agent_name] = {
+                "phase": effective_phase,
+                "skill_context": resolved_skills.context,
+                "skill_names": resolved_skills.skill_names,
+                "skills_skipped": resolved_skills.skipped,
+            }
+            if resolved_skills.events:
+                _get_state_store(state).append_skill_events(resolved_skills.events)
     except Exception as exc:  # pragma: no cover - skill injection must never block execution
         agent.skill_context = ""
         skill_errors.append(f"{agent_name} skill injection: {exc}")
@@ -521,10 +551,12 @@ def _invoke_agent(state: OrchestratorState, agent_name: str, prompt: str) -> tup
                 "fallback": False,
                 "skills_loaded": skill_names,
                 "skills_skipped": skill_skipped,
+                "skills_cache_phase": effective_phase,
+                "skills_cache_status": skill_cache_status,
                 "tool_calls": tc_result.tool_calls_made,
                 "tool_iterations": tc_result.iterations,
             }
-            return tc_result.final_content, metadata, skill_errors
+            return tc_result.final_content, metadata, skill_errors, agent_skills_cache
         else:
             # No tools — direct generation
             result = agent.generate(prompt)
@@ -535,10 +567,12 @@ def _invoke_agent(state: OrchestratorState, agent_name: str, prompt: str) -> tup
                 "fallback": False,
                 "skills_loaded": skill_names,
                 "skills_skipped": skill_skipped,
+                "skills_cache_phase": effective_phase,
+                "skills_cache_status": skill_cache_status,
                 "tool_calls": 0,
                 "tool_iterations": 0,
             }
-            return result.output, metadata, skill_errors
+            return result.output, metadata, skill_errors, agent_skills_cache
     except Exception as exc:  # pragma: no cover - defensive runtime fallback
         fallback = f"[fallback:{agent_name}] {prompt[:500]}"
         return fallback, {
@@ -548,9 +582,11 @@ def _invoke_agent(state: OrchestratorState, agent_name: str, prompt: str) -> tup
             "fallback": True,
             "skills_loaded": skill_names,
             "skills_skipped": skill_skipped,
+            "skills_cache_phase": effective_phase,
+            "skills_cache_status": skill_cache_status,
             "tool_calls": 0,
             "tool_iterations": 0,
-        }, skill_errors + [f"{agent_name}: {exc}"]
+        }, skill_errors + [f"{agent_name}: {exc}"], agent_skills_cache
 
 
 def _generate_one(agent, prompt: str) -> tuple[str, dict[str, Any]]:
@@ -810,7 +846,8 @@ def memory_rehydration(state: OrchestratorState) -> dict[str, Any]:
         if project is None:
             mem_store.create_project(state.get("project_id", "default"), state.get("project_id", "default"))
         memory_context = MemoryContextAgent(mem_store)
-        agent_ids = list(create_all_agents().keys())
+        registry = _get_registry(state.get("registry_path", DEFAULT_REGISTRY_PATH))
+        agent_ids = registry.agent_ids
         task.agent_ids = agent_ids
         packs = memory_context.hydrate(task, agent_ids, token_budget=1200)
         global_context = memory_context.get_global_context(state.get("project_id", "default"), limit=10)
@@ -838,7 +875,7 @@ def discovery(state: OrchestratorState) -> dict[str, Any]:
     store = _get_state_store(state)
     agent_name = _phase_owner(state, "discovery", "BusinessAnalyst")
     prompt = f"Analyze the user's task, clarify goals, risks, and constraints.\n\nTask:\n{state.get('task', '')}"
-    output, meta, errors = _invoke_agent(state, agent_name, prompt)
+    output, meta, errors, agent_skills_cache = _invoke_agent(state, agent_name, prompt, phase_id="discovery")
     produced = _write_agent_slot_and_drafts(state, store, phase_id="discovery", agent_name=agent_name, output=output, summary="Discovery draft ready")
     _write_canonical_artifact(store, "discovery", output, created_by=agent_name, summary="Discovery summary")
     shared = _update_shared_snapshot(state, agent_name, **{"discovery.output": output})
@@ -851,6 +888,7 @@ def discovery(state: OrchestratorState) -> dict[str, Any]:
         "pending_phases": pending_phases,
         "discovery_output": output,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": errors,
         "events": [_event("discovery", "Discovery draft produced", **meta)],
@@ -871,7 +909,7 @@ def prd(state: OrchestratorState) -> dict[str, Any]:
         "Turn the discovery into an actionable PRD with scope, acceptance criteria, non-goals, and rollout notes.\n\n"
         f"Task:\n{state.get('task', '')}\n\nDiscovery:\n{state.get('discovery_output', '')}"
     )
-    output, meta, errors = _invoke_agent(state, agent_name, prompt)
+    output, meta, errors, agent_skills_cache = _invoke_agent(state, agent_name, prompt, phase_id="prd")
     produced = _write_agent_slot_and_drafts(state, store, phase_id="prd", agent_name=agent_name, output=output, summary="PRD draft ready")
     _write_canonical_artifact(store, "prd", output, created_by=agent_name, summary="Product requirements document")
     shared = _update_shared_snapshot(state, agent_name, **{"prd.output": output})
@@ -884,6 +922,7 @@ def prd(state: OrchestratorState) -> dict[str, Any]:
         "pending_phases": pending_phases,
         "prd_output": output,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": errors,
         "events": [_event("prd", "PRD draft produced", **meta)],
@@ -903,6 +942,7 @@ def planning(state: OrchestratorState) -> dict[str, Any]:
     planning_outputs: dict[str, Any] = {}
     all_errors: list[str] = []
     subevents: list[dict[str, Any]] = []
+    agent_skills_cache = dict(state.get("agent_skills_cache", {}))
 
     planning_prompt = (
         f"Task:\n{state.get('task', '')}\n\n"
@@ -911,7 +951,8 @@ def planning(state: OrchestratorState) -> dict[str, Any]:
     )
 
     for agent_name in _phase_parallel_agents(state, "technical_planning") or ["Planner", "CodebaseExplorer", "Architect", "SystemDesigner"]:
-        output, meta, errors = _invoke_agent(state, agent_name, planning_prompt)
+        invocation_state = {**state, "agent_skills_cache": agent_skills_cache}
+        output, meta, errors, agent_skills_cache = _invoke_agent(invocation_state, agent_name, planning_prompt, phase_id="technical_planning")
         produced = _write_agent_slot_and_drafts(state, store, phase_id="technical_planning", agent_name=agent_name, output=output, summary=f"{agent_name} planning draft ready")
         planning_outputs[agent_name] = {"output": output, "draft_artifacts": produced, **meta}
         all_errors.extend(errors)
@@ -924,7 +965,12 @@ def planning(state: OrchestratorState) -> dict[str, Any]:
         f"PRD:\n{state.get('prd_output', '')}\n\n"
         f"Drafts:\n{planning_outputs}"
     )
-    spec_output, meta, errors = _invoke_agent(state, consolidator, consolidation_prompt)
+    spec_output, meta, errors, agent_skills_cache = _invoke_agent(
+        {**state, "agent_skills_cache": agent_skills_cache},
+        consolidator,
+        consolidation_prompt,
+        phase_id="spec_consolidation",
+    )
     all_errors.extend(errors)
     _write_agent_slot_and_drafts(state, store, phase_id="spec_consolidation", agent_name=consolidator, output=spec_output, summary="Canonical spec consolidated")
 
@@ -951,6 +997,7 @@ def planning(state: OrchestratorState) -> dict[str, Any]:
         "pending_phases": pending_phases,
         "plan": spec_output,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": all_errors,
         "events": subevents + [_event("planning", "Canonical spec consolidated", **meta)],
@@ -972,7 +1019,7 @@ def testing(state: OrchestratorState) -> dict[str, Any]:
         f"Task:\n{state.get('task', '')}\n\n"
         f"Spec:\n{state.get('plan', '')}"
     )
-    output, meta, errors = _invoke_agent(state, agent_name, prompt)
+    output, meta, errors, agent_skills_cache = _invoke_agent(state, agent_name, prompt, phase_id="tdd")
     produced = _write_agent_slot_and_drafts(state, store, phase_id="tdd", agent_name=agent_name, output=output, summary="Test plan ready")
     _write_canonical_artifact(store, "test_plan", output, created_by=agent_name, summary="Test plan")
     shared = _update_shared_snapshot(state, agent_name, **{"testing.plan": output})
@@ -985,6 +1032,7 @@ def testing(state: OrchestratorState) -> dict[str, Any]:
         "pending_phases": pending_phases,
         "test_plan": output,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": errors,
         "events": [_event("testing", "Test plan drafted", **meta)],
@@ -1004,6 +1052,7 @@ def implementation(state: OrchestratorState) -> dict[str, Any]:
     impl_outputs: dict[str, Any] = {}
     all_errors: list[str] = []
     events: list[dict[str, Any]] = []
+    agent_skills_cache = dict(state.get("agent_skills_cache", {}))
 
     prompt = (
         f"Task:\n{state.get('task', '')}\n\n"
@@ -1012,7 +1061,8 @@ def implementation(state: OrchestratorState) -> dict[str, Any]:
     )
 
     for agent_name in _phase_parallel_agents(state, "implementation") or ["BackendImplementer", "FrontendImplementer"]:
-        output, meta, errors = _invoke_agent(state, agent_name, prompt)
+        invocation_state = {**state, "agent_skills_cache": agent_skills_cache}
+        output, meta, errors, agent_skills_cache = _invoke_agent(invocation_state, agent_name, prompt, phase_id="implementation")
         produced = _write_agent_slot_and_drafts(state, store, phase_id="implementation", agent_name=agent_name, output=output, summary=f"{agent_name} implementation summary")
         impl_outputs[agent_name] = {"output": output, "draft_artifacts": produced, **meta}
         all_errors.extend(errors)
@@ -1024,7 +1074,12 @@ def implementation(state: OrchestratorState) -> dict[str, Any]:
         f"Design system:\n{store.get_artifact('design_system') or {}}\n\n"
         f"Implementation outputs:\n{impl_outputs}"
     )
-    review_output, meta, errors = _invoke_agent(state, reviewer, review_prompt)
+    review_output, meta, errors, agent_skills_cache = _invoke_agent(
+        {**state, "agent_skills_cache": agent_skills_cache},
+        reviewer,
+        review_prompt,
+        phase_id="implementation",
+    )
     _write_agent_slot_and_drafts(state, store, phase_id="implementation", agent_name=reviewer, output=review_output, summary="Implementation review by SystemDesigner")
     all_errors.extend(errors)
     events.append(_event("implementation", "Continuous design review completed", **meta))
@@ -1047,6 +1102,7 @@ def implementation(state: OrchestratorState) -> dict[str, Any]:
         "pending_phases": pending_phases,
         "implementation_output": combined,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": all_errors,
         "events": events,
@@ -1064,7 +1120,7 @@ def contract_alignment(state: OrchestratorState) -> dict[str, Any]:
         f"Implementation:\n{state.get('implementation_output', '')}\n\n"
         f"Spec:\n{state.get('plan', '')}"
     )
-    output, meta, errors = _invoke_agent(state, agent_name, prompt)
+    output, meta, errors, agent_skills_cache = _invoke_agent(state, agent_name, prompt, phase_id="contract_alignment")
     produced = _write_agent_slot_and_drafts(state, store, phase_id="contract_alignment", agent_name=agent_name, output=output, summary="Contract alignment report ready")
     _write_canonical_artifact(store, "contract_report", output, created_by=agent_name, summary="Contract alignment report")
     shared = _update_shared_snapshot(state, agent_name, **{"contract.alignment": output})
@@ -1077,6 +1133,7 @@ def contract_alignment(state: OrchestratorState) -> dict[str, Any]:
         "pending_phases": pending_phases,
         "contract_report": output,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": errors,
         "events": [_event("contract_alignment", "Contract alignment report generated", **meta)],
@@ -1096,6 +1153,7 @@ def review(state: OrchestratorState) -> dict[str, Any]:
     review_outputs: dict[str, Any] = {}
     all_errors: list[str] = []
     events: list[dict[str, Any]] = []
+    agent_skills_cache = dict(state.get("agent_skills_cache", {}))
 
     prompt = (
         f"Task:\n{state.get('task', '')}\n\n"
@@ -1104,7 +1162,8 @@ def review(state: OrchestratorState) -> dict[str, Any]:
         f"Test plan:\n{state.get('test_plan', '')}"
     )
     for agent_name in _phase_parallel_agents(state, "review") or ["Reviewer", "SecurityReviewer", "Tester"]:
-        output, meta, errors = _invoke_agent(state, agent_name, prompt)
+        invocation_state = {**state, "agent_skills_cache": agent_skills_cache}
+        output, meta, errors, agent_skills_cache = _invoke_agent(invocation_state, agent_name, prompt, phase_id="review")
         produced = _write_agent_slot_and_drafts(state, store, phase_id="review", agent_name=agent_name, output=output, summary=f"{agent_name} review output ready")
         review_outputs[agent_name] = {"output": output, "draft_artifacts": produced, **meta}
         all_errors.extend(errors)
@@ -1124,6 +1183,7 @@ def review(state: OrchestratorState) -> dict[str, Any]:
         "pending_phases": pending_phases,
         "test_results": tester_output,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": all_errors,
         "events": events,
@@ -1139,6 +1199,7 @@ def quality_gate(state: OrchestratorState) -> dict[str, Any]:
     qa_outputs: dict[str, Any] = {}
     all_errors: list[str] = []
     events: list[dict[str, Any]] = []
+    agent_skills_cache = dict(state.get("agent_skills_cache", {}))
 
     prompt = (
         f"Task:\n{state.get('task', '')}\n\n"
@@ -1147,7 +1208,8 @@ def quality_gate(state: OrchestratorState) -> dict[str, Any]:
         f"Spec:\n{state.get('plan', '')}"
     )
     for agent_name in _phase_parallel_agents(state, "qa_docs") or ["QAGatekeeper", "DependencyChecker", "TechnicalWriter"]:
-        output, meta, errors = _invoke_agent(state, agent_name, prompt)
+        invocation_state = {**state, "agent_skills_cache": agent_skills_cache}
+        output, meta, errors, agent_skills_cache = _invoke_agent(invocation_state, agent_name, prompt, phase_id="qa_docs")
         produced = _write_agent_slot_and_drafts(state, store, phase_id="qa_docs", agent_name=agent_name, output=output, summary=f"{agent_name} QA/docs output ready")
         qa_outputs[agent_name] = {"output": output, "draft_artifacts": produced, **meta}
         all_errors.extend(errors)
@@ -1182,6 +1244,7 @@ def quality_gate(state: OrchestratorState) -> dict[str, Any]:
         "docs_output": docs_output,
         "phase_route": route,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": all_errors,
         "events": events + [_event("quality_gate", "Quality gate evaluated", passed=gate_passed)],
@@ -1199,7 +1262,7 @@ def release(state: OrchestratorState) -> dict[str, Any]:
         f"QA/docs:\n{state.get('phase_outputs', {}).get('qa_docs', {})}\n\n"
         f"Implementation summary:\n{state.get('implementation_output', '')}"
     )
-    output, meta, errors = _invoke_agent(state, agent_name, prompt)
+    output, meta, errors, agent_skills_cache = _invoke_agent(state, agent_name, prompt, phase_id="release")
     produced = _write_agent_slot_and_drafts(state, store, phase_id="release", agent_name=agent_name, output=output, summary="Release package ready")
     _write_canonical_artifact(store, "release_notes", output, created_by=agent_name, summary="Release notes")
     shared = _update_shared_snapshot(state, agent_name, **{"release.output": output})
@@ -1212,6 +1275,7 @@ def release(state: OrchestratorState) -> dict[str, Any]:
         "pending_phases": pending_phases,
         "release_output": output,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": errors,
         "events": [_event("release", "Release notes prepared", **meta)],
@@ -1232,6 +1296,7 @@ def deploy(state: OrchestratorState) -> dict[str, Any]:
     state = _with_defaults(state)
     store = _get_state_store(state)
     agent_name = _phase_owner(state, "deploy", "Builder")
+    agent_skills_cache = dict(state.get("agent_skills_cache", {}))
 
     if not state.get("allow_deploy", False):
         output = "Deploy skipped because allow_deploy=false. Runtime still produced the deploy phase handoff."
@@ -1242,7 +1307,7 @@ def deploy(state: OrchestratorState) -> dict[str, Any]:
             "Prepare a safe deployment execution summary, verification steps, and post-deploy checks.\n\n"
             f"Release notes:\n{state.get('release_output', '')}"
         )
-        output, meta, errors = _invoke_agent(state, agent_name, prompt)
+        output, meta, errors, agent_skills_cache = _invoke_agent(state, agent_name, prompt, phase_id="deploy")
 
     produced = _write_agent_slot_and_drafts(state, store, phase_id="deploy", agent_name=agent_name, output=output, summary="Deploy report ready")
     _write_canonical_artifact(store, "deploy_report", output, created_by=agent_name, summary="Deploy report")
@@ -1256,6 +1321,7 @@ def deploy(state: OrchestratorState) -> dict[str, Any]:
         "pending_phases": pending_phases,
         "deploy_output": output,
         "phase_outputs": phase_outputs,
+        "agent_skills_cache": agent_skills_cache,
         "shared_state_snapshot": shared,
         "errors": errors,
         "events": [_event("deploy", "Deploy phase completed", **meta)],

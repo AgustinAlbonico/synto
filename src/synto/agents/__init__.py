@@ -1,6 +1,7 @@
 """Agents submodule."""
 
 from synto.agents.base import BaseAgent, AgentResult
+from synto.agents.factory import AgentFactory, AGENT_CLASS_MAP
 from synto.agents.workflow_agents import (
     DiscoveryAgent,
     PlannerAgent,
@@ -35,6 +36,8 @@ from synto.agents.all_agents import (
 __all__ = [
     "BaseAgent",
     "AgentResult",
+    "AgentFactory",
+    "AGENT_CLASS_MAP",
     "DiscoveryAgent",
     "PlannerAgent",
     "ImplementerAgent",
