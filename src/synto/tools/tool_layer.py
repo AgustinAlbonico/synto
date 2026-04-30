@@ -892,6 +892,154 @@ def process_list() -> dict[str, Any]:
 
 # ── Utility ─────────────────────────────────────────────────────────────────
 
+# ── Skills Registry Tools ──────────────────────────────────────────────────────
+
+@register_tool(
+    "skills_search", "skills",
+    "Search the skills.sh marketplace for available agent skills. Returns name, description, owner/repo, tags, and install count.",
+    {
+        "query": {"type": "string", "description": "Search keyword (e.g. 'docker deploy', 'github pr')"},
+        "limit": {"type": "integer", "description": "Max results (default: 10, max: 50)", "default": 10},
+        "agent": {"type": "string", "description": "Filter by supported agent (e.g. 'claude', 'openai')", "default": ""},
+        "tag": {"type": "string", "description": "Filter by tag", "default": ""},
+    }
+)
+def skills_search(query: str, limit: int = 10, agent: str = "", tag: str = "") -> dict[str, Any]:
+    try:
+        from synto.registry.skills_sh_client import get_client
+        client = get_client()
+        # Build a combined query including agent/tag filters
+        q = query
+        if agent:
+            q = f"{q} agent:{agent}"
+        if tag:
+            q = f"{q} topic:{tag}"
+        results = client.search(q, limit=min(limit, 30))
+        return {
+            "results": [
+                {
+                    "skill_id": s.skill_id,
+                    "name": s.name,
+                    "description": s.description,
+                    "owner": s.owner,
+                    "repo": s.repo,
+                    "github_url": s.github_url,
+                    "tags": s.tags,
+                    "stars": s.stargazers,
+                }
+                for s in results
+            ],
+            "count": len(results),
+            "query": query,
+        }
+    except Exception as e:
+        return {"error": str(e), "results": []}
+
+
+@register_tool(
+    "skills_top", "skills",
+    "Get the most-installed skills from the skills.sh marketplace.",
+    {
+        "limit": {"type": "integer", "description": "Number of results (default: 10, max: 50)", "default": 10},
+    }
+)
+def skills_top(limit: int = 10) -> dict[str, Any]:
+    try:
+        from synto.registry.skills_sh_client import get_client
+        client = get_client()
+        # Top skills: query popular topics
+        results = client.search("agent skill", limit=min(limit, 30))
+        return {
+            "results": [
+                {
+                    "skill_id": s.skill_id,
+                    "name": s.name,
+                    "description": s.description,
+                    "owner": s.owner,
+                    "repo": s.repo,
+                    "tags": s.tags,
+                    "stars": s.stargazers,
+                }
+                for s in results
+            ],
+            "count": len(results),
+        }
+    except Exception as e:
+        return {"error": str(e), "results": []}
+
+
+@register_tool(
+    "skills_install", "skills",
+    "Install a skill from skills.sh to a local skills directory. The skill is downloaded and saved locally.",
+    {
+        "skill_id": {"type": "string", "description": "Skill ID in format 'owner/repo/skillId' (e.g. 'vercel-labs/agent-skills/vercel-react-best-practices')"},
+        "target_dir": {"type": "string", "description": "Local directory to install to (default: ~/.hermes/skills/)"},
+        "force": {"type": "boolean", "description": "Overwrite if already installed", "default": False},
+    }
+)
+def skills_install(skill_id: str, target_dir: str = "", force: bool = False) -> dict[str, Any]:
+    try:
+        from synto.registry.skills_sh_client import get_client
+        from pathlib import Path
+        client = get_client()
+        target = Path(target_dir) if target_dir else Path.home() / ".hermes" / "skills"
+        result = client.install_to(skill_id, target, force=force)
+        return result
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@register_tool(
+    "skills_show", "skills",
+    "Show the full SKILL.md content for a skill from skills.sh (preview before installing).",
+    {
+        "skill_id": {"type": "string", "description": "Skill ID in format 'owner/repo/skillId'"},
+    }
+)
+def skills_show(skill_id: str) -> dict[str, Any]:
+    try:
+        from synto.registry.skills_sh_client import get_client
+        client = get_client()
+        content = client.get_content(skill_id)
+        if content is None:
+            # Try via get()
+            skill = client.get(skill_id)
+            if not skill:
+                return {"error": f"Skill not found: {skill_id}"}
+            return {
+                "skill_id": skill.skill_id,
+                "name": skill.name,
+                "description": skill.description,
+                "content": "Content not available via API. Try installing it with skills_install.",
+            }
+        return {
+            "skill_id": skill_id,
+            "content": content,
+            "truncated": len(content) > 8000,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@register_tool(
+    "skills_sources", "skills",
+    "List the top source repositories on skills.sh (most skills, most installs).",
+    {
+        "limit": {"type": "integer", "description": "Number of sources (default: 20)", "default": 20},
+    }
+)
+def skills_sources(limit: int = 20) -> dict[str, Any]:
+    try:
+        from synto.registry.skills_sh_client import get_client
+        client = get_client()
+        sources = client.sources()[:limit]
+        return {"sources": sources, "count": len(sources)}
+    except Exception as e:
+        return {"error": str(e), "sources": []}
+
+
+# ── Utility ─────────────────────────────────────────────────────────────────
+
 def _human_size(size: int) -> str:
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if size < 1024:

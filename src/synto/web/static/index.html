@@ -47,46 +47,102 @@
       </header>
 
       <section id="dashboard" class="panel section active-section">
-        <div class="section-head">
+        <div class="hero-card">
           <div>
-            <span class="eyebrow">Run dashboard</span>
-            <h2>Estado global</h2>
+            <span class="eyebrow">Synto Command Center</span>
+            <h2>Elegí modelo, workspace y recién después delegá al swarm.</h2>
+            <p class="muted">La UI arranca bloqueada a propósito: primero se define el LLM general, después el contexto del proyecto y por último aparece el orquestador.</p>
           </div>
           <span id="healthBadge" class="badge">Conectando…</span>
         </div>
-        <div id="metrics" class="metrics"></div>
-        <div class="grid two">
-          <form id="launchForm" class="launch-card">
-            <span class="eyebrow">Nuevo workflow</span>
-            <h3>Mandá una tarea al equipo</h3>
-            <label>Proyecto
-              <input name="project_id" value="synto" autocomplete="off" />
-            </label>
-            <label>Tarea
-              <textarea name="task" rows="5" placeholder="Ej: Crear autenticación por email con tests y docs"></textarea>
-            </label>
-            <div class="form-row">
-              <label>Modo
-                <select name="execution_mode">
-                  <option value="interactive" selected>Interactivo con gates</option>
-                  <option value="automatic">Automático</option>
-                </select>
+
+        <div class="setup-steps">
+          <article class="setup-card" id="modelStep">
+            <span class="step-number">1</span>
+            <div>
+              <span class="eyebrow">Modelo general</span>
+              <h3>Motor base de la app</h3>
+              <label>Modelo general
+                <select id="generalModelSelect"><option value="">Cargando modelos…</option></select>
               </label>
-              <label class="checkbox-line">
-                <input name="allow_deploy" type="checkbox" /> Permitir deploy
+              <label>Modelo del orquestador
+                <select id="orchestratorModelSelect"><option value="">Usar modelo general</option></select>
               </label>
+              <p class="muted">Sin este modelo no se habilita la creación de runs.</p>
             </div>
-            <button type="submit" class="primary">Lanzar run</button>
-            <p class="muted">Por defecto autoaprueba discovery y frena en PRD para que puedas revisar.</p>
-          </form>
-          <div>
-            <div class="section-head compact">
-              <h3>Runs recientes</h3>
-              <span id="runCount" class="badge"></span>
+          </article>
+
+          <article class="setup-card" id="workspaceStep">
+            <span class="step-number">2</span>
+            <div>
+              <span class="eyebrow">Workspace</span>
+              <h3>Carpeta de trabajo</h3>
+              <label>Workspaces recientes
+                <select id="savedWorkspaceSelect"><option value="">Seleccionar workspace guardado…</option></select>
+              </label>
+              <label>Nombre
+                <input id="workspaceName" autocomplete="off" placeholder="synto" />
+              </label>
+              <label>Ruta de carpeta
+                <input id="workspacePath" autocomplete="off" placeholder="/home/agust/hermes-orchestrator o C:\\Users\\agust\\Desktop\\app" />
+              </label>
+              <div class="quick-actions">
+                <button id="scanWorkspaceBtn" type="button" class="primary small">Procesar workspace</button>
+                <button id="saveSettingsBtn" type="button" class="ghost small">Guardar setup</button>
+              </div>
             </div>
-            <div id="runsList" class="stack"></div>
-          </div>
+          </article>
+
+          <article class="setup-card stack-card" id="stackStep">
+            <span class="step-number">3</span>
+            <div>
+              <span class="eyebrow">Stack detectado</span>
+              <h3>Resumen tecnológico</h3>
+              <div id="stackSummary" class="stack-summary muted">Procesá un workspace para ver tecnologías, frameworks, runtime y tooling.</div>
+            </div>
+          </article>
         </div>
+
+        <form id="launchForm" class="orchestrator-card locked">
+          <div class="section-head compact">
+            <div>
+              <span class="eyebrow">Agente orquestador</span>
+              <h3>Delegá una tarea</h3>
+            </div>
+            <div class="orchestrator-model-inline">
+              <label>Modelo orquestador
+                <select name="orchestrator_model" id="inlineOrchestratorModel"><option value="">Usar setup</option></select>
+              </label>
+            </div>
+          </div>
+          <input name="project_id" id="projectIdInput" value="synto" type="hidden" />
+          <label>Prompt
+            <textarea id="taskPrompt" name="task" rows="7" placeholder="Ej: Simplificá la UI, dejá tests y documentá los cambios"></textarea>
+          </label>
+          <div class="form-row">
+            <label>Modo
+              <select name="execution_mode">
+                <option value="interactive" selected>Interactivo con gates</option>
+                <option value="automatic">Automático</option>
+              </select>
+            </label>
+            <label class="checkbox-line">
+              <input name="allow_deploy" type="checkbox" /> Permitir deploy
+            </label>
+          </div>
+          <div class="quick-actions">
+            <button id="improvePromptBtn" type="button" class="ghost">Mejorar prompt</button>
+            <button id="sendPromptBtn" type="submit" class="primary">Enviar al orquestador</button>
+          </div>
+          <p id="orchestratorLockHint" class="muted">Seleccioná modelo y workspace para habilitar el orquestador.</p>
+        </form>
+
+        <div class="section-head compact" style="margin-top: 1.5rem;">
+          <h3>Runs recientes</h3>
+          <span id="runCount" class="badge"></span>
+        </div>
+        <div id="metrics" class="metrics compact-metrics"></div>
+        <div id="runsList" class="stack"></div>
       </section>
 
       <section id="run-detail" class="panel section">
@@ -205,6 +261,26 @@
           </div>
           <button id="refreshProvidersBtn" class="ghost">Refrescar</button>
         </div>
+        <div class="model-config-card">
+          <div class="section-head compact">
+            <div>
+              <span class="eyebrow">Configuración rápida</span>
+              <h3>Modelos por rol</h3>
+              <p class="muted">El modelo general se aplica por defecto; el orquestador y cada subagente pueden tener override.</p>
+            </div>
+            <button id="saveModelOverridesBtn" class="primary small">Guardar modelos</button>
+          </div>
+          <div class="grid two">
+            <label>Modelo general
+              <select id="settingsGeneralModelSelect"><option value="">Seleccionar modelo…</option></select>
+            </label>
+            <label>Modelo del orquestador
+              <select id="settingsOrchestratorModelSelect"><option value="">Usar modelo general</option></select>
+            </label>
+          </div>
+          <h4>Subagentes</h4>
+          <div id="agentModelOverrides" class="agent-model-overrides"></div>
+        </div>
         <div id="providersList" class="stack"></div>
         <div class="section-head" style="margin-top: 2rem;">
           <div>
@@ -263,6 +339,35 @@
         <div id="activityLog" class="activity-log"></div>
       </div>
     </aside>
+  </div>
+
+  <div id="promptModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="promptModalTitle">
+    <div class="modal-backdrop" data-close-modal="prompt"></div>
+    <article class="modal-card">
+      <div class="section-head compact">
+        <div>
+          <span class="eyebrow">Prompt improver</span>
+          <h2 id="promptModalTitle">Prompt mejorado</h2>
+          <p class="muted">Synto agregó contexto, criterios de aceptación y entregables. Podés editar antes de guardar.</p>
+        </div>
+        <button id="cancelImprovedPromptBtn" class="ghost small" type="button">Cancelar</button>
+      </div>
+      <textarea id="improvedPromptText" rows="14"></textarea>
+      <div class="grid two modal-grid">
+        <div>
+          <h3>Qué se mejoró</h3>
+          <div id="promptImprovements" class="stack"></div>
+        </div>
+        <div>
+          <h3>Por qué</h3>
+          <div id="promptReasons" class="stack"></div>
+        </div>
+      </div>
+      <div class="quick-actions modal-actions">
+        <button id="saveImprovedPromptBtn" type="button" class="primary">Guardar y reemplazar prompt</button>
+        <button id="closeImprovedPromptBtn" type="button" class="ghost">Cerrar sin cambios</button>
+      </div>
+    </article>
   </div>
 
   <script src="/static/app.js" type="module"></script>

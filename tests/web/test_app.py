@@ -146,6 +146,10 @@ def test_create_run_and_resume_use_checkpoint_contract(tmp_path, monkeypatch):
                     "checkpoint_db_path": payload["checkpoint_db_path"],
                     "workflow": {"current_phase": "prd", "completed_phases": ["intake", "discovery"], "pending_phases": ["prd"]},
                     "shared_state": {"task": payload["task"]},
+                    "selected_model": payload.get("selected_model"),
+                    "orchestrator_model": payload.get("orchestrator_model"),
+                    "workspace_paths": payload.get("workspace_paths", []),
+                    "technology_stack": payload.get("technology_stack", {}),
                     "slots": {},
                     "artifacts": {},
                     "gates": {"prd_gate": {"status": "pending"}},
@@ -169,11 +173,47 @@ def test_create_run_and_resume_use_checkpoint_contract(tmp_path, monkeypatch):
     monkeypatch.setattr(web_app, "get_compiled", lambda checkpoint_db=None: FakeWorkflow(checkpoint_db))
     client = _client(tmp_path)
 
-    created = client.post("/api/runs", json={"project_id": "synto", "task": "Build UI"}).json()
+    created = client.post(
+        "/api/runs",
+        json={"project_id": "synto", "task": "Build UI", "model": "openai/gpt-5.5", "workspace_paths": [str(tmp_path)]},
+    ).json()
     assert created["status"] == "waiting_approval"
     assert created["interrupt"]["gate"] == "prd_gate"
+    assert created["state"]["selected_model"] == "openai/gpt-5.5"
+    assert created["state"]["workspace_paths"] == [str(tmp_path)]
 
     run_id = created["run"]["run_id"]
     resumed = client.post(f"/api/runs/{run_id}/resume", json={"action": "approve", "notes": "ok"}).json()
     assert resumed["run"]["status"] == "completed"
     assert resumed["state"]["workflow"]["current_phase"] == "delivery"
+
+
+def test_setup_endpoints_scan_settings_and_prompt_improve(tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"react": "latest", "vite": "latest", "typescript": "latest"}}))
+    (tmp_path / "tsconfig.json").write_text("{}")
+    client = _client(tmp_path)
+
+    scanned = client.post("/api/workspaces/scan", json={"name": "Synto UI", "paths": [str(tmp_path)]})
+    assert scanned.status_code == 200
+    stack_names = {item["name"] for item in scanned.json()["stack"]["items"]}
+    assert {"React", "Vite", "TypeScript"}.issubset(stack_names)
+
+    saved = client.put(
+        "/api/app-settings",
+        json={
+            "selected_model": "openai/gpt-5.5",
+            "orchestrator_model": "openai/gpt-5.5",
+            "agent_models": {"FrontendImplementer": "openai/gpt-5.5"},
+            "selected_workspace": scanned.json()["workspace"],
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["settings"]["selected_model"] == "openai/gpt-5.5"
+    assert (tmp_path / ".synto" / "models.yaml").exists()
+
+    improved = client.post(
+        "/api/prompt/improve",
+        json={"prompt": "Mejorá la UI", "workspace": scanned.json()["workspace"], "stack": scanned.json()["stack"]},
+    ).json()
+    assert "Criterios de aceptación" in improved["improved_prompt"]
+    assert "React" in improved["improved_prompt"]

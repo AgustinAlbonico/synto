@@ -7,6 +7,10 @@ const state = {
   agents: [],
   phases: [],
   skills: [],
+  settings: {},
+  workspaces: [],
+  stack: null,
+  promptImprovement: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -71,12 +75,215 @@ async function loadAgents() {
   state.agents = data.agents || [];
   state.phases = data.phases || [];
   renderAgents();
+  renderModelOverrides();
 }
 
 async function loadSkills() {
   const data = await api("/api/skills");
   state.skills = data.skills || [];
   renderSkills();
+}
+
+async function loadAppSettings() {
+  const data = await api("/api/app-settings");
+  state.settings = data.settings || {};
+  state.stack = state.settings.selected_workspace?.stack || state.stack;
+}
+
+async function loadWorkspaces() {
+  const data = await api("/api/workspaces");
+  state.workspaces = data.workspaces || [];
+}
+
+function modelOptions(selected = "", includeEmpty = "Seleccionar modelo…") {
+  const models = state.allModels || [];
+  const configured = models.filter((m) => m.configured !== false);
+  const source = configured.length ? configured : models;
+  const options = [`<option value="">${escapeHtml(includeEmpty)}</option>`];
+  for (const model of source) {
+    const label = `${model.provider_name || "LLM"} · ${model.id}${model.tier ? ` · ${model.tier}` : ""}`;
+    options.push(`<option value="${escapeHtml(model.id)}" ${model.id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`);
+  }
+  if (selected && !source.some((model) => model.id === selected)) {
+    options.splice(1, 0, `<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>`);
+  }
+  return options.join("");
+}
+
+function currentWorkspace() {
+  return state.settings.selected_workspace || {};
+}
+
+function isSetupReady() {
+  const workspace = currentWorkspace();
+  return Boolean(state.settings.selected_model && workspace.paths && workspace.paths.length);
+}
+
+function renderWorkspaceSelect() {
+  const selected = currentWorkspace();
+  const options = [`<option value="">Seleccionar workspace guardado…</option>`];
+  for (const workspace of state.workspaces) {
+    const id = workspace.id || workspace.name || "workspace";
+    options.push(`<option value="${escapeHtml(id)}" ${id === selected.id ? "selected" : ""}>${escapeHtml(workspace.name || id)}</option>`);
+  }
+  $("#savedWorkspaceSelect").innerHTML = options.join("");
+  $("#workspaceName").value = selected.name || "";
+  $("#workspacePath").value = (selected.paths || [""])[0] || "";
+  $("#projectIdInput").value = selected.id || "synto";
+}
+
+function renderStackSummary(stack = state.stack) {
+  const box = $("#stackSummary");
+  if (!stack || !stack.items || !stack.items.length) {
+    box.className = "stack-summary muted";
+    box.innerHTML = "Procesá un workspace para ver tecnologías, frameworks, runtime y tooling.";
+    return;
+  }
+  box.className = "stack-summary";
+  box.innerHTML = `
+    ${stack.items.map((item) => `<span class="stack-chip" title="${escapeHtml((item.reasons || []).join(" · "))}"><span class="icon">${escapeHtml(item.icon || "•")}</span>${escapeHtml(item.name)}<small>${escapeHtml(item.category || "")}</small></span>`).join("")}
+    <div class="stack-note">${escapeHtml(stack.summary || "")} · confianza ${(stack.confidence || 0).toFixed ? (stack.confidence * 100).toFixed(0) : stack.confidence}%</div>
+  `;
+}
+
+function renderModelOverrides() {
+  const configBox = $("#agentModelOverrides");
+  if (!configBox) return;
+  const selectedModel = state.settings.selected_model || "";
+  const orchestratorModel = state.settings.orchestrator_model || selectedModel;
+  $("#settingsGeneralModelSelect").innerHTML = modelOptions(selectedModel, "Seleccionar modelo general…");
+  $("#settingsOrchestratorModelSelect").innerHTML = modelOptions(orchestratorModel, "Usar modelo general");
+  const overrides = state.settings.agent_models || {};
+  const agents = [...(state.agents || [])].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  configBox.innerHTML = agents.length ? agents.map((agent) => `
+    <label class="agent-model-row">
+      <strong>${escapeHtml(agent.id)}</strong>
+      <select class="agent-model-select" data-agent-id="${escapeHtml(agent.id)}">
+        ${modelOptions(overrides[agent.id] || "", "Usar modelo general")}
+      </select>
+    </label>
+  `).join("") : `<p class="muted">Cargando agentes…</p>`;
+}
+
+function renderSetup() {
+  const selectedModel = state.settings.selected_model || "";
+  const orchestratorModel = state.settings.orchestrator_model || selectedModel;
+  $("#generalModelSelect").innerHTML = modelOptions(selectedModel, "Seleccionar modelo general…");
+  $("#orchestratorModelSelect").innerHTML = modelOptions(orchestratorModel, "Usar modelo general");
+  $("#inlineOrchestratorModel").innerHTML = modelOptions(orchestratorModel, "Usar setup");
+  renderWorkspaceSelect();
+  renderStackSummary();
+  renderModelOverrides();
+  $("#modelStep").classList.toggle("ready", Boolean(selectedModel));
+  $("#workspaceStep").classList.toggle("ready", Boolean(currentWorkspace().paths?.length));
+  $("#stackStep").classList.toggle("ready", Boolean(state.stack?.items?.length));
+  const ready = isSetupReady();
+  $("#launchForm").classList.toggle("locked", !ready);
+  $("#sendPromptBtn").disabled = !ready;
+  $("#improvePromptBtn").disabled = !ready;
+  $("#orchestratorLockHint").textContent = ready
+    ? `Listo: ${selectedModel} · ${(currentWorkspace().paths || []).join(", ")}`
+    : "Seleccioná modelo y workspace para habilitar el orquestador.";
+}
+
+async function saveAppSettings(partial = {}) {
+  const selectedWorkspace = partial.selected_workspace || currentWorkspace();
+  const selectedModel = partial.selected_model ?? $("#generalModelSelect").value;
+  const orchestratorModel = partial.orchestrator_model ?? ($("#orchestratorModelSelect").value || selectedModel);
+  const data = await api("/api/app-settings", {
+    method: "PUT",
+    body: {
+      selected_model: selectedModel,
+      orchestrator_model: orchestratorModel,
+      agent_models: partial.agent_models ?? state.settings.agent_models ?? {},
+      selected_workspace: selectedWorkspace,
+    },
+  });
+  state.settings = data.settings || {};
+  state.stack = state.settings.selected_workspace?.stack || state.stack;
+  renderSetup();
+  return state.settings;
+}
+
+async function saveModelOverrides() {
+  const agentModels = {};
+  document.querySelectorAll(".agent-model-select").forEach((select) => {
+    if (select.value) agentModels[select.dataset.agentId] = select.value;
+  });
+  await saveAppSettings({
+    selected_model: $("#settingsGeneralModelSelect").value,
+    orchestrator_model: $("#settingsOrchestratorModelSelect").value || $("#settingsGeneralModelSelect").value,
+    agent_models: agentModels,
+  });
+  logActivity("Modelos por rol guardados.");
+}
+
+async function scanWorkspace() {
+  const name = $("#workspaceName").value.trim();
+  const path = $("#workspacePath").value.trim();
+  if (!path) return logActivity("Elegí una ruta para procesar el workspace.");
+  logActivity("Procesando workspace…");
+  const data = await api("/api/workspaces/scan", { method: "POST", body: { name, paths: [path] } });
+  state.stack = data.stack;
+  state.settings.selected_workspace = data.workspace;
+  await saveAppSettings({ selected_workspace: data.workspace });
+  await loadWorkspaces();
+  renderSetup();
+  logActivity(`Workspace procesado: ${data.workspace.name}`);
+}
+
+async function selectSavedWorkspace() {
+  const id = $("#savedWorkspaceSelect").value;
+  const workspace = state.workspaces.find((item) => String(item.id) === id);
+  if (!workspace) return;
+  state.settings.selected_workspace = workspace;
+  state.stack = workspace.stack || null;
+  $("#workspaceName").value = workspace.name || "";
+  $("#workspacePath").value = (workspace.paths || [""])[0] || "";
+  if (!state.stack && workspace.paths?.length) {
+    await scanWorkspace();
+    return;
+  }
+  await saveAppSettings({ selected_workspace: workspace });
+  renderSetup();
+  logActivity(`Workspace seleccionado: ${workspace.name || workspace.id}`);
+}
+
+function openPromptModal(data) {
+  state.promptImprovement = data;
+  $("#improvedPromptText").value = data.improved_prompt || data.prompt || "";
+  const improvements = data.improvements || data.changes || [];
+  const reasons = data.reasons || data.explanations || (data.why ? [data.why] : []);
+  $("#promptImprovements").innerHTML = improvements.length ? improvements.map((item) => `<article class="prompt-note">${escapeHtml(item)}</article>`).join("") : `<p class="muted">Se estructuró el pedido.</p>`;
+  $("#promptReasons").innerHTML = reasons.length ? reasons.map((item) => `<article class="prompt-note">${escapeHtml(item)}</article>`).join("") : `<p class="muted">Más contexto ayuda a delegar mejor.</p>`;
+  $("#promptModal").classList.remove("hidden");
+}
+
+function closePromptModal() {
+  $("#promptModal").classList.add("hidden");
+}
+
+async function improveCurrentPrompt() {
+  const prompt = $("#taskPrompt").value.trim();
+  if (!prompt) return logActivity("Escribí un prompt antes de mejorarlo.");
+  logActivity("Mejorando prompt…");
+  const data = await api("/api/prompt/improve", {
+    method: "POST",
+    body: {
+      prompt,
+      workspace: currentWorkspace(),
+      stack: state.stack || {},
+      model: $("#inlineOrchestratorModel").value || state.settings.orchestrator_model || state.settings.selected_model || "",
+    },
+  });
+  openPromptModal(data);
+  logActivity("Prompt mejorado listo para revisar.");
+}
+
+function saveImprovedPrompt() {
+  $("#taskPrompt").value = $("#improvedPromptText").value;
+  closePromptModal();
+  logActivity("Prompt reemplazado por la versión mejorada.");
 }
 
 async function loadMemoryStats() {
@@ -268,9 +475,19 @@ async function launchRun(event) {
   const form = new FormData(event.currentTarget);
   const task = String(form.get("task") || "").trim();
   if (!task) return logActivity("Escribí una tarea antes de lanzar el run.");
+  if (!isSetupReady()) return logActivity("Primero seleccioná un modelo y procesá un workspace.");
+  const workspace = currentWorkspace();
+  const orchestratorModel = $("#inlineOrchestratorModel").value || state.settings.orchestrator_model || state.settings.selected_model;
+  if (orchestratorModel !== state.settings.orchestrator_model) {
+    await saveAppSettings({ orchestrator_model: orchestratorModel });
+  }
   const body = {
-    project_id: String(form.get("project_id") || "default"),
+    project_id: String(form.get("project_id") || workspace.id || "default"),
     task,
+    model: state.settings.selected_model,
+    orchestrator_model: orchestratorModel,
+    workspace_id: workspace.id || "",
+    workspace_paths: workspace.paths || [],
     execution_mode: String(form.get("execution_mode") || "interactive"),
     allow_deploy: form.get("allow_deploy") === "on",
     auto_approve_gates: ["discovery_gate"],
@@ -587,10 +804,11 @@ async function saveProfiles() {
 
 async function refreshLLMData() {
   try {
-    await Promise.all([loadProviders(), loadAllModels(), loadProfiles()]);
-    logActivity("LLM providers actualizados");
+    await Promise.all([loadProviders(), loadAllModels(), loadProfiles(), loadAppSettings(), loadWorkspaces()]);
+    renderSetup();
+    logActivity("LLM providers y setup actualizados");
   } catch (err) {
-    logActivity(`Error cargando LLM: ${err.message}`);
+    logActivity(`Error cargando LLM/setup: ${err.message}`);
   }
 }
 
@@ -616,6 +834,30 @@ function bindEvents() {
   $("#refreshProvidersBtn").addEventListener("click", refreshLLMData);
   $("#modelFilter").addEventListener("input", renderAllModels);
   $("#saveProfilesBtn").addEventListener("click", saveProfiles);
+  $("#saveModelOverridesBtn").addEventListener("click", saveModelOverrides);
+  $("#generalModelSelect").addEventListener("change", async () => {
+    await saveAppSettings({ selected_model: $("#generalModelSelect").value, orchestrator_model: $("#orchestratorModelSelect").value || $("#generalModelSelect").value });
+    logActivity("Modelo general guardado.");
+  });
+  $("#orchestratorModelSelect").addEventListener("change", async () => {
+    await saveAppSettings({ orchestrator_model: $("#orchestratorModelSelect").value || $("#generalModelSelect").value });
+    logActivity("Modelo del orquestador guardado.");
+  });
+  $("#inlineOrchestratorModel").addEventListener("change", async () => {
+    await saveAppSettings({ orchestrator_model: $("#inlineOrchestratorModel").value || $("#generalModelSelect").value });
+    logActivity("Modelo del orquestador actualizado desde la cabina.");
+  });
+  $("#savedWorkspaceSelect").addEventListener("change", selectSavedWorkspace);
+  $("#scanWorkspaceBtn").addEventListener("click", scanWorkspace);
+  $("#saveSettingsBtn").addEventListener("click", async () => {
+    await saveAppSettings();
+    logActivity("Setup guardado.");
+  });
+  $("#improvePromptBtn").addEventListener("click", improveCurrentPrompt);
+  $("#saveImprovedPromptBtn").addEventListener("click", saveImprovedPrompt);
+  $("#closeImprovedPromptBtn").addEventListener("click", closePromptModal);
+  $("#cancelImprovedPromptBtn").addEventListener("click", closePromptModal);
+  document.querySelector("[data-close-modal='prompt']").addEventListener("click", closePromptModal);
   $("#refreshToolsBtn").addEventListener("click", refreshTools);
   $$(".tool-cat-btn").forEach((btn) => btn.addEventListener("click", () => {
     $$(".tool-cat-btn").forEach((b) => b.classList.remove("active"));
@@ -623,6 +865,9 @@ function bindEvents() {
     loadTools(btn.dataset.cat);
   }));
 }
+
+window.testProvider = testProvider;
+window.editProvider = editProvider;
 
 bindEvents();
 refreshAll();

@@ -21,6 +21,8 @@ from synto.mcp.memory_tools import MemoryToolLayer
 from synto.memory import MemoryStore
 from synto.memory.obsidian_export import export_to_obsidian
 from synto.registry import AgentRegistry, SkillRegistry
+from synto.web.prompt_improver import improve_prompt
+from synto.web.workspace_stack import detect_stack, normalize_user_path
 from synto.workflows import build_initial_state, get_compiled
 from synto.workflows.orchestrator import DEFAULT_REGISTRY_PATH
 
@@ -245,6 +247,25 @@ def _memory_tools(config: WebConfig) -> tuple[MemoryStore, MemoryToolLayer]:
     return store, MemoryToolLayer(store)
 
 
+class AppSettingsRequest(BaseModel):
+    selected_model: str = ""
+    orchestrator_model: str = ""
+    agent_models: dict[str, str] = Field(default_factory=dict)
+    selected_workspace: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceScanRequest(BaseModel):
+    name: str = ""
+    paths: list[str] = Field(default_factory=list)
+
+
+class PromptImproveRequest(BaseModel):
+    prompt: str = Field(..., min_length=1)
+    workspace: dict[str, Any] = Field(default_factory=dict)
+    stack: dict[str, Any] = Field(default_factory=dict)
+    model: str = ""
+
+
 class RunCreateRequest(BaseModel):
     task: str = Field(..., min_length=1)
     project_id: str = "default"
@@ -253,6 +274,10 @@ class RunCreateRequest(BaseModel):
     allow_deploy: bool = False
     thread_id: str = ""
     max_retries: int = Field(2, ge=0, le=10)
+    model: str = ""
+    orchestrator_model: str = ""
+    workspace_id: str = ""
+    workspace_paths: list[str] = Field(default_factory=list)
 
 
 class ResumeRequest(BaseModel):
@@ -287,6 +312,105 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    def _config_dir_or_default() -> Path:
+        cfg_dir = config.config_dir or (config.workspace_dir / ".synto")
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        config.config_dir = cfg_dir
+        return cfg_dir
+
+    def _settings_path() -> Path:
+        return _config_dir_or_default() / "app-settings.json"
+
+    def _load_app_settings() -> dict[str, Any]:
+        settings = _read_json(_settings_path(), {})
+        if not isinstance(settings, dict):
+            settings = {}
+        settings.setdefault("selected_model", "")
+        settings.setdefault("orchestrator_model", settings.get("selected_model", ""))
+        settings.setdefault("agent_models", {})
+        settings.setdefault("selected_workspace", {})
+        return settings
+
+    def _save_app_settings(settings: dict[str, Any]) -> dict[str, Any]:
+        normalized = {
+            "selected_model": str(settings.get("selected_model", "") or ""),
+            "orchestrator_model": str(settings.get("orchestrator_model", "") or settings.get("selected_model", "") or ""),
+            "agent_models": settings.get("agent_models", {}) if isinstance(settings.get("agent_models"), dict) else {},
+            "selected_workspace": settings.get("selected_workspace", {}) if isinstance(settings.get("selected_workspace"), dict) else {},
+        }
+        path = _settings_path()
+        path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+        return normalized
+
+    def _load_models_yaml() -> dict[str, Any]:
+        models_path = _config_dir_or_default() / "models.yaml"
+        if not models_path.exists():
+            return {}
+        import yaml as _yaml
+        return _yaml.safe_load(models_path.read_text(encoding="utf-8")) or {}
+
+    def _save_models_yaml(data: dict[str, Any]) -> Path:
+        import yaml as _yaml
+        models_path = _config_dir_or_default() / "models.yaml"
+        models_path.write_text(_yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        try:
+            from synto.workflows import orchestrator as workflow_orchestrator
+            cache_key = str(_config_dir_or_default().resolve())
+            getattr(workflow_orchestrator, "_ROUTER_CACHE", {}).pop(cache_key, None)
+        except Exception:
+            pass
+        return models_path
+
+    def _sync_models_from_app_settings(settings: dict[str, Any]) -> None:
+        selected_model = str(settings.get("selected_model", "") or "")
+        orchestrator_model = str(settings.get("orchestrator_model", "") or selected_model)
+        agent_models = settings.get("agent_models", {}) if isinstance(settings.get("agent_models"), dict) else {}
+        if not selected_model and not orchestrator_model and not agent_models:
+            return
+        data = _load_models_yaml()
+        data.setdefault("profiles", {})
+        data.setdefault("agents", {})
+        if selected_model:
+            for profile in ("default", "balanced", "strategic", "heavy_coding"):
+                data["profiles"][profile] = selected_model
+        if orchestrator_model:
+            data["profiles"]["orchestrator"] = orchestrator_model
+            data["agents"]["HermesOrchestrator"] = "orchestrator"
+            data["agents"]["CodeOrchestrator"] = "orchestrator"
+        for agent_name, model_id in agent_models.items():
+            if not agent_name or not model_id:
+                continue
+            profile_name = f"agent_{_slugify(str(agent_name))}"
+            data["profiles"][profile_name] = str(model_id)
+            data["agents"][str(agent_name)] = profile_name
+        _save_models_yaml(data)
+
+    def _known_workspaces(settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        settings = settings or _load_app_settings()
+        workspaces: dict[str, dict[str, Any]] = {}
+
+        def add_workspace(item: dict[str, Any]) -> None:
+            wid = _slugify(str(item.get("id") or item.get("name") or item.get("path") or "workspace"))
+            normalized = {**item, "id": wid}
+            workspaces[wid] = {**workspaces.get(wid, {}), **normalized}
+
+        selected = settings.get("selected_workspace") if isinstance(settings, dict) else {}
+        if isinstance(selected, dict) and selected.get("paths"):
+            add_workspace(selected)
+        add_workspace({"id": "current", "name": config.workspace_dir.name or "Workspace actual", "paths": [str(config.workspace_dir)], "kind": "current"})
+        for state_root, snapshot in _load_snapshots(config):
+            project_id = snapshot.get("project_id") or state_root.name
+            paths = snapshot.get("workspace_paths") or (snapshot.get("shared_state", {}) or {}).get("workspace_paths") or []
+            add_workspace({
+                "id": project_id,
+                "name": project_id,
+                "paths": paths if isinstance(paths, list) else [],
+                "state_root": str(state_root),
+                "kind": "previous_run",
+                "last_updated_at": snapshot.get("last_updated_at", ""),
+            })
+        return list(workspaces.values())
+
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {
@@ -297,6 +421,54 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             "memory_db_path": str(config.memory_db_path),
             "registry_path": str(config.registry_path),
         }
+
+    @app.get("/api/app-settings")
+    def get_app_settings() -> dict[str, Any]:
+        settings = _load_app_settings()
+        return {"settings": settings, "ready": bool(settings.get("selected_model") and (settings.get("selected_workspace") or {}).get("paths"))}
+
+    @app.put("/api/app-settings")
+    def update_app_settings(payload: AppSettingsRequest) -> dict[str, Any]:
+        current = _load_app_settings()
+        merged = {
+            **current,
+            "selected_model": payload.selected_model,
+            "orchestrator_model": payload.orchestrator_model or payload.selected_model,
+            "agent_models": payload.agent_models,
+            "selected_workspace": payload.selected_workspace,
+        }
+        saved = _save_app_settings(merged)
+        _sync_models_from_app_settings(saved)
+        return {"status": "ok", "settings": saved, "models_path": str(_config_dir_or_default() / "models.yaml")}
+
+    @app.get("/api/workspaces")
+    def list_workspaces() -> dict[str, Any]:
+        settings = _load_app_settings()
+        return {"workspaces": _known_workspaces(settings), "selected": settings.get("selected_workspace", {})}
+
+    @app.post("/api/workspaces/scan")
+    def scan_workspace(payload: WorkspaceScanRequest) -> dict[str, Any]:
+        if not payload.paths:
+            raise HTTPException(status_code=400, detail="Elegí al menos una carpeta de workspace")
+        stack = detect_stack(payload.paths)
+        if not stack["paths"]:
+            raise HTTPException(status_code=404, detail="No se encontró ninguna carpeta válida para analizar")
+        first_path = Path(stack["paths"][0])
+        workspace = {
+            "id": _slugify(payload.name or first_path.name),
+            "name": payload.name or first_path.name,
+            "paths": stack["paths"],
+            "stack": stack,
+            "kind": "scanned",
+        }
+        settings = _load_app_settings()
+        settings["selected_workspace"] = workspace
+        _save_app_settings(settings)
+        return {"workspace": workspace, "stack": stack}
+
+    @app.post("/api/prompt/improve")
+    def improve_prompt_endpoint(payload: PromptImproveRequest) -> dict[str, Any]:
+        return improve_prompt(payload.prompt, workspace=payload.workspace, stack=payload.stack)
 
     @app.get("/api/runs")
     def list_runs() -> dict[str, Any]:
@@ -312,13 +484,53 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
 
     @app.post("/api/runs")
     def create_run(payload: RunCreateRequest) -> dict[str, Any]:
+        settings = _load_app_settings()
+        selected_workspace = settings.get("selected_workspace") if isinstance(settings.get("selected_workspace"), dict) else {}
+        settings_has_model = bool(settings.get("selected_model"))
+        settings_has_workspace = bool((settings.get("selected_workspace") or {}).get("paths"))
+
+        effective_model = payload.model or settings.get("selected_model", "")
+        orchestrator_model = payload.orchestrator_model or settings.get("orchestrator_model", "") or effective_model
+        workspace_paths = payload.workspace_paths or (settings.get("selected_workspace", {}).get("paths", []) if isinstance(settings.get("selected_workspace"), dict) else [])
+
+        # Only enforce model/workspace validation when the system has already been configured
+        if settings_has_model and not effective_model:
+            raise HTTPException(status_code=400, detail="Primero seleccioná un modelo general de IA")
+        if settings_has_workspace and not workspace_paths:
+            raise HTTPException(status_code=400, detail="Primero seleccioná o escaneá un workspace")
+
+        normalized_workspace_paths = [str(normalize_user_path(path)) for path in workspace_paths]
+        workspace_stack = selected_workspace.get("stack") if isinstance(selected_workspace, dict) else None
+        if not isinstance(workspace_stack, dict) or workspace_stack.get("paths") != normalized_workspace_paths:
+            workspace_stack = detect_stack(normalized_workspace_paths) if normalized_workspace_paths else {"paths": []}
+        if settings_has_workspace and not workspace_stack.get("paths"):
+            raise HTTPException(status_code=400, detail="No se pudo leer ninguna carpeta del workspace seleccionado")
+
+        workspace_id = payload.workspace_id or (selected_workspace.get("id") if isinstance(selected_workspace, dict) else "") or _slugify(Path(workspace_stack["paths"][0]).name)
+        workspace_name = (selected_workspace.get("name") if isinstance(selected_workspace, dict) else "") or workspace_id
+        selected_workspace = {
+            **(selected_workspace if isinstance(selected_workspace, dict) else {}),
+            "id": workspace_id,
+            "name": workspace_name,
+            "paths": workspace_stack["paths"],
+            "stack": workspace_stack,
+        }
+        saved_settings = _save_app_settings({
+            **settings,
+            "selected_model": effective_model,
+            "orchestrator_model": orchestrator_model,
+            "selected_workspace": selected_workspace,
+        })
+        _sync_models_from_app_settings(saved_settings)
+
         run_id = uuid.uuid4().hex[:12]
         thread_id = payload.thread_id or run_id
-        state_root = config.state_root_for(payload.project_id)
+        project_id = payload.project_id or workspace_id or "default"
+        state_root = config.state_root_for(project_id)
         initial_state = build_initial_state(
             payload.task,
-            project_id=payload.project_id or "default",
-            config_dir=str(config.config_dir or ""),
+            project_id=project_id,
+            config_dir=str(_config_dir_or_default()),
             registry_path=str(config.registry_path),
             skills_dirs=[str(path) for path in config.skills_dirs],
             state_root=str(state_root),
@@ -329,7 +541,15 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             max_retries=payload.max_retries,
             thread_id=thread_id,
         )
-        initial_state["run_id"] = run_id
+        initial_state.update({
+            "run_id": run_id,
+            "selected_model": effective_model,
+            "orchestrator_model": orchestrator_model,
+            "workspace_id": workspace_id,
+            "workspace": selected_workspace,
+            "workspace_paths": workspace_stack["paths"],
+            "technology_stack": workspace_stack,
+        })
         checkpoint_db = initial_state["checkpoint_db_path"]
         workflow = get_compiled(checkpoint_db)
         result = workflow.invoke(initial_state, config={"configurable": {"thread_id": thread_id}})

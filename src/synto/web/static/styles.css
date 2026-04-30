@@ -187,6 +187,7 @@ input:focus, textarea:focus, select:focus { border-color: rgba(185, 111, 60, .7)
 .muted { color: var(--ink-soft); font-size: .9rem; }
 
 .metrics { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.compact-metrics { grid-template-columns: repeat(4, minmax(140px, 1fr)); }
 .metric {
   position: relative;
   overflow: hidden;
@@ -197,6 +198,110 @@ input:focus, textarea:focus, select:focus { border-color: rgba(185, 111, 60, .7)
 }
 .metric strong { display:block; font-size: 2.25rem; letter-spacing: -0.06em; line-height: 1; }
 .metric span { color: var(--ink-soft); font-size: .84rem; }
+
+.hero-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: clamp(18px, 3vw, 30px);
+  border-radius: calc(var(--radius) + 6px);
+  border: 1px solid rgba(185,111,60,.24);
+  background:
+    radial-gradient(circle at 90% 0%, rgba(96,114,79,.20), transparent 18rem),
+    linear-gradient(135deg, rgba(255,255,255,.78), rgba(255,255,255,.34));
+  margin-bottom: 18px;
+}
+.hero-card h2 { max-width: 760px; }
+.setup-steps {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.setup-card, .orchestrator-card {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(255,255,255,.48);
+  padding: 18px;
+}
+.setup-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+}
+.step-number {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background: var(--carbon);
+  color: #fff8e8;
+  font-weight: 900;
+  box-shadow: 0 10px 28px rgba(37,40,32,.18);
+}
+.setup-card.ready { border-color: rgba(96,114,79,.46); background: color-mix(in srgb, var(--moss) 10%, white 70%); }
+.stack-summary { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; min-height: 150px; }
+.stack-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(32,35,29,.12);
+  background: rgba(255,255,255,.62);
+  color: var(--ink);
+  font-size: .86rem;
+}
+.stack-chip .icon { font-size: 1rem; }
+.stack-note { width: 100%; color: var(--ink-soft); font-size: .86rem; margin-top: 4px; }
+.orchestrator-card { margin: 18px 0 4px; }
+.orchestrator-card.locked {
+  opacity: .62;
+  filter: grayscale(.08);
+}
+.orchestrator-card.locked textarea,
+.orchestrator-card.locked button[type="submit"],
+.orchestrator-card.locked #improvePromptBtn { pointer-events: none; }
+.orchestrator-model-inline { min-width: min(360px, 100%); }
+.modal.hidden { display: none; }
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(24,24,19,.52);
+  backdrop-filter: blur(8px);
+}
+.modal-card {
+  position: relative;
+  width: min(1040px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  border-radius: 30px;
+  border: 1px solid rgba(255,255,255,.28);
+  background: var(--panel);
+  box-shadow: 0 40px 120px rgba(0,0,0,.36);
+  padding: clamp(18px, 3vw, 30px);
+}
+.modal-card textarea { min-height: 340px; font-family: var(--sans); line-height: 1.5; }
+.modal-grid { margin-top: 16px; }
+.prompt-note {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255,255,255,.48);
+  padding: 12px;
+  color: var(--ink-soft);
+}
+.modal-actions { justify-content: flex-end; margin-top: 18px; }
 
 .run-card, .agent-card, .skill-card, .artifact-card, .gate-card, .memory-card, .event-item {
   border: 1px solid var(--line);
@@ -265,6 +370,7 @@ input:focus, textarea:focus, select:focus { border-color: rgba(185, 111, 60, .7)
 
 @media (max-width: 1180px) {
   .shell { grid-template-columns: 220px minmax(0, 1fr); }
+  .setup-steps { grid-template-columns: 1fr; }
   .command-panel { grid-column: 2; position: static; }
 }
 @media (max-width: 840px) {
@@ -273,11 +379,34 @@ input:focus, textarea:focus, select:focus { border-color: rgba(185, 111, 60, .7)
   .workspace { display:block; }
   .topbar, .section-head { flex-direction: column; align-items: flex-start; }
   .panel { margin-bottom: 14px; }
-  .grid.two, .metrics { grid-template-columns: 1fr; }
+  .grid.two, .metrics, .setup-steps { grid-template-columns: 1fr; }
   .command-panel { position: static; }
 }
 
 /* ── LLM Provider Manager ─────────────────────────────────────────── */
+
+.model-config-card {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255,255,255,.50);
+  padding: 18px;
+  margin-bottom: 16px;
+}
+.agent-model-overrides {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.agent-model-row {
+  border: 1px solid rgba(32,35,29,.12);
+  border-radius: 16px;
+  background: rgba(255,255,255,.42);
+  padding: 10px;
+}
+.agent-model-row strong { display:block; font-size: .88rem; margin-bottom: 7px; }
 
 .provider-card {
   border: 1px solid var(--line);
