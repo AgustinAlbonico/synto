@@ -1,0 +1,303 @@
+version: 1
+updated: "2026-04-30"
+status: proposed-runtime-contract
+
+activation:
+  domain_required: code
+  new_project_detection_file: .synto/config.yaml
+  if_domain_not_code: do_not_run_code_flow
+
+opencode:
+  binary_preference:
+    - /home/agust/.opencode/bin/opencode
+    - opencode
+  verified_version: "1.14.28"
+  default_command: run
+  default_format: json
+  default_agent: build
+  use_dangerously_skip_permissions: false
+  context_dir: .synto/runs/{run_id}/context
+  output_dir: .synto/runs/{run_id}/opencode/{agent_id}
+  patch_dir: .synto/runs/{run_id}/patches
+  worktree_dir: .synto/worktrees/{run_id}/{agent_id}
+  title_template: "synto:{run_id}:{agent_id}:{task_id}"
+
+skill_policy:
+  fixed_are_always_loaded: true
+  dynamic_selected_by:
+    - stack
+    - task_type
+    - file_globs
+    - agent_allowed_tags
+  never_load_code_execution_for:
+    - InterviewAgent
+    - RequirementsAgent
+    - TechStackAdvisorAgent
+
+agents:
+  HermesOrchestrator:
+    registry_agent: HermesOrchestrator
+    kind: conversational
+    opencode: none
+    fixed_skills:
+      - writing-plans
+      - subagent-driven-development
+      - obsidian
+    responsibilities:
+      - classify_intent
+      - route_domain
+      - present_internal_questions_to_user
+      - request_gate_approvals
+
+  CodeOrchestrator:
+    registry_agent: CodeOrchestrator
+    kind: orchestrator
+    opencode: tool_invoker_only
+    fixed_skills:
+      - test-driven-development
+      - writing-plans
+      - codebase-inspection
+      - systematic-debugging
+    responsibilities:
+      - select_new_or_existing_project_flow
+      - coordinate_code_agents
+      - enforce_tdd_before_implementation
+      - consolidate_artifacts
+      - launch_opencode_sessions
+
+  ProjectInitAgent:
+    registry_agent: null
+    registry_status: new_agent_required
+    kind: detector
+    opencode: none
+    fixed_skills:
+      - codebase-inspection
+    outputs:
+      - new_project_flag
+      - workspace_status
+
+  InterviewAgent:
+    registry_agent: BusinessAnalyst
+    registry_status: conceptual_alias
+    kind: conversational
+    opencode: none
+    fixed_skills:
+      - writing-plans
+      - obsidian
+    outputs:
+      - 01-discovery/context.md
+
+  RequirementsAgent:
+    registry_agent: ProductManager
+    registry_status: conceptual_alias
+    kind: artifact_writer
+    opencode: optional_documentation_writer
+    fixed_skills:
+      - writing-plans
+      - obsidian
+    outputs:
+      - 02-requirements/requirements.md
+
+  TechStackAdvisorAgent:
+    registry_agent: null
+    registry_status: new_agent_required
+    kind: advisor
+    opencode: none
+    fixed_skills:
+      - writing-plans
+      - codebase-inspection
+    optional_skills:
+      - web-research-workflow
+      - llm-provider-discovery
+      - cloudflare-tunnel-local-dev
+    outputs:
+      - 01-discovery/stack.md
+      - stack_config_fragment
+
+  ProjectInitializerAgent:
+    registry_agent: null
+    registry_status: new_agent_required
+    kind: executor
+    opencode: write
+    fixed_skills:
+      - opencode
+      - test-driven-development
+      - github-repo-management
+    dynamic_skills:
+      node:
+        - node-inspect-debugger
+      python:
+        - python-debugpy
+      go:
+        - go-testing
+      frontend:
+        - frontend-design
+    allowed_modes:
+      - write
+    parallel_safe: false
+
+  PlannerAgent:
+    registry_agent: Planner
+    registry_status: conceptual_alias
+    kind: planner
+    opencode: optional_readonly
+    fixed_skills:
+      - writing-plans
+      - codebase-inspection
+    outputs:
+      - 05-tasks/tasks.md
+      - task_graph
+
+  TDDAgent:
+    registry_agent: Tester
+    registry_status: conceptual_alias
+    kind: executor
+    opencode: test_only
+    fixed_skills:
+      - opencode
+      - test-driven-development
+      - systematic-debugging
+      - codebase-inspection
+    dynamic_skills:
+      node:
+        - node-inspect-debugger
+      python:
+        - python-debugpy
+      go:
+        - go-testing
+    restrictions:
+      - do_not_write_production_code
+      - do_not_change_prd_or_spec
+    allowed_paths_by_mode:
+      test_only:
+        - tests/**
+        - test/**
+        - __tests__/**
+        - "*.test.*"
+        - "*.spec.*"
+        - playwright.config.*
+        - vitest.config.*
+        - jest.config.*
+        - pytest.ini
+    must_run_before:
+      - BackendImplementer
+      - FrontendImplementer
+
+  BackendImplementer:
+    registry_agent: BackendImplementer
+    kind: executor
+    opencode: write
+    fixed_skills:
+      - opencode
+      - test-driven-development
+      - systematic-debugging
+    dynamic_skills:
+      node:
+        - node-inspect-debugger
+      python:
+        - python-debugpy
+      go:
+        - go-testing
+    restrictions:
+      - do_not_modify_frontend_unless_shared_contract
+      - do_not_change_prd_or_spec
+      - do_not_commit_or_push
+    parallel_safe_with_worktree: true
+
+  FrontendImplementer:
+    registry_agent: FrontendImplementer
+    kind: executor
+    opencode: write
+    fixed_skills:
+      - opencode
+      - frontend-design
+      - test-driven-development
+    dynamic_skills:
+      node:
+        - node-inspect-debugger
+      react:
+        - popular-web-designs
+    restrictions:
+      - do_not_modify_backend_unless_shared_contract
+      - do_not_change_prd_or_spec
+      - do_not_commit_or_push
+    parallel_safe_with_worktree: true
+
+  ContractAligner:
+    registry_agent: ContractAligner
+    kind: verifier
+    opencode: readonly_or_contract_tests
+    fixed_skills:
+      - codebase-inspection
+      - test-driven-development
+    outputs:
+      - contract_report
+
+  Reviewer:
+    registry_agent: Reviewer
+    kind: reviewer
+    opencode: readonly
+    fixed_skills:
+      - requesting-code-review
+      - github-code-review
+      - codebase-inspection
+    restrictions:
+      - do_not_modify_files_unless_explicitly_requested
+
+  SecurityReviewer:
+    registry_agent: SecurityReviewer
+    kind: reviewer
+    opencode: readonly
+    fixed_skills:
+      - requesting-code-review
+      - systematic-debugging
+    restrictions:
+      - do_not_modify_files_unless_explicitly_requested
+
+  QAGatekeeper:
+    registry_agent: QAGatekeeper
+    kind: gatekeeper
+    opencode: readonly_with_safe_test_commands
+    fixed_skills:
+      - codebase-inspection
+      - systematic-debugging
+      - test-driven-development
+    outputs:
+      - qa_report
+      - gate_statuses
+
+execution_order:
+  new_project:
+    - ProjectInitAgent
+    - InterviewAgent
+    - RequirementsAgent
+    - TechStackAdvisorAgent
+    - ProjectInitializerAgent
+    - PlannerAgent
+    - TDDAgent
+    - BackendImplementer
+    - FrontendImplementer
+    - ContractAligner
+    - Reviewer
+    - SecurityReviewer
+    - QAGatekeeper
+
+  existing_project:
+    - InterviewAgent
+    - RequirementsAgent
+    - PlannerAgent
+    - TDDAgent
+    - BackendImplementer
+    - FrontendImplementer
+    - ContractAligner
+    - Reviewer
+    - SecurityReviewer
+    - QAGatekeeper
+
+parallelism:
+  default: sequential
+  allowed_after_tdd:
+    - BackendImplementer
+    - FrontendImplementer
+  requires_worktrees: true
+  merge_strategy: patches_then_contract_alignment

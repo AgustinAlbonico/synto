@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.types import Command
@@ -304,6 +305,19 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         description="Local-first web UI and API for Synto agent swarms.",
         version="0.1.0",
     )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "http://127.0.0.1:8788",
+            "http://localhost:8788",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.synto_config = config
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -506,13 +520,20 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         if settings_has_workspace and not workspace_stack.get("paths"):
             raise HTTPException(status_code=400, detail="No se pudo leer ninguna carpeta del workspace seleccionado")
 
-        workspace_id = payload.workspace_id or (selected_workspace.get("id") if isinstance(selected_workspace, dict) else "") or _slugify(Path(workspace_stack["paths"][0]).name)
+        workspace_paths_detected = workspace_stack.get("paths", [])
+        workspace_id = (
+            payload.workspace_id
+            or (selected_workspace.get("id") if isinstance(selected_workspace, dict) else "")
+            or (_slugify(Path(workspace_paths_detected[0]).name) if workspace_paths_detected else "")
+            or payload.project_id
+            or "default"
+        )
         workspace_name = (selected_workspace.get("name") if isinstance(selected_workspace, dict) else "") or workspace_id
         selected_workspace = {
             **(selected_workspace if isinstance(selected_workspace, dict) else {}),
             "id": workspace_id,
             "name": workspace_name,
-            "paths": workspace_stack["paths"],
+            "paths": workspace_paths_detected,
             "stack": workspace_stack,
         }
         saved_settings = _save_app_settings({

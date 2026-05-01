@@ -81,6 +81,21 @@ def test_web_health_and_static_index(tmp_path):
     assert "Synto Command Center" in index.text
 
 
+def test_api_accepts_tauri_desktop_origin(tmp_path):
+    client = _client(tmp_path)
+
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "tauri://localhost",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "tauri://localhost"
+
+
 def test_runs_artifacts_events_and_registry_contract(tmp_path):
     _write_run(tmp_path / "projects")
     client = _client(tmp_path)

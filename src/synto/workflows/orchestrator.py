@@ -25,6 +25,21 @@ from synto.memory import (
     TaskContext,
 )
 from synto.registry import AgentRegistry, SkillLoader, SkillRegistry
+from synto.runtime import (
+    AgentExecutionSpec,
+    AgentRunResult,
+    OpenCodeSessionRunner,
+    agent_runtime_config,
+    agents_before_or_equal,
+    allowed_paths_for,
+    classify_domain,
+    is_code_domain,
+    load_code_agent_runtime,
+    opencode_binary,
+    opencode_mode_for,
+    resolve_workspace_root,
+    select_code_flow_kind,
+)
 from synto.state import SharedState, StateStore
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -125,6 +140,14 @@ class OrchestratorState(TypedDict, total=False):
     state_root: str
     checkpoint_db_path: str
     memory_db_path: str
+    domain: str
+    code_flow_kind: str
+    code_project_initialized: bool
+    opencode_enabled: bool
+    opencode_results: dict[str, Any]
+    workspace_paths: list[str]
+    workspace: dict[str, Any]
+    technology_stack: dict[str, Any]
     run_id: str
     thread_id: str
     execution_mode: str
@@ -211,6 +234,14 @@ def build_initial_state(
         "state_root": resolved_state_root,
         "checkpoint_db_path": checkpoint_db_path or _default_checkpoint_db_path(resolved_state_root),
         "memory_db_path": memory_db_path,
+        "domain": "",
+        "code_flow_kind": "",
+        "code_project_initialized": False,
+        "opencode_enabled": os.getenv("SYNTO_OPENCODE_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"},
+        "opencode_results": {},
+        "workspace_paths": [],
+        "workspace": {},
+        "technology_stack": {},
         "run_id": uuid.uuid4().hex[:12],
         "thread_id": thread_id,
         "execution_mode": execution_mode,
@@ -345,10 +376,12 @@ def _phase_review_agent(state: OrchestratorState, phase_id: str) -> str:
 
 
 def _get_router(config_dir: str = "") -> LLMMultiProvider:
-    cache_key = str(Path(config_dir).resolve()) if config_dir else "__default__"
+    config_path = Path(config_dir).resolve() if config_dir else None
+    effective_config_dir = str(config_path) if config_path and (config_path / "providers.yaml").exists() else ""
+    cache_key = effective_config_dir or "__default__"
     router = _ROUTER_CACHE.get(cache_key)
     if router is None:
-        router = LLMMultiProvider(config_dir)
+        router = LLMMultiProvider(effective_config_dir)
         _ROUTER_CACHE[cache_key] = router
     return router
 
@@ -431,6 +464,13 @@ def _persist_runtime_metadata(state: OrchestratorState, updates: dict[str, Any],
     metadata = {
         "run_id": merged.get("run_id", ""),
         "project_id": merged.get("project_id", ""),
+        "domain": merged.get("domain", ""),
+        "workspace_root": merged.get("workspace_root", ""),
+        "workspace_paths": merged.get("workspace_paths", []),
+        "code_flow_kind": merged.get("code_flow_kind", ""),
+        "code_project_initialized": merged.get("code_project_initialized", False),
+        "opencode_enabled": merged.get("opencode_enabled", False),
+        "opencode_results": merged.get("opencode_results", {}),
         "thread_id": thread_id,
         "memory_db_path": merged.get("memory_db_path", ""),
         "registry_path": merged.get("registry_path", DEFAULT_REGISTRY_PATH),
@@ -466,6 +506,129 @@ def _event(node_type: str, summary: str, **extra: Any) -> dict[str, Any]:
     payload = {"type": node_type, "summary": summary}
     payload.update(extra)
     return payload
+
+
+def _code_runtime(state: OrchestratorState) -> dict[str, Any]:
+    return load_code_agent_runtime(state.get("code_agent_runtime_path") or None)
+
+
+def _code_domain_metadata(state: OrchestratorState) -> dict[str, Any]:
+    runtime = _code_runtime(state)
+    domain = classify_domain(state.get("task", ""), state.get("domain", ""))
+    workspace_root = resolve_workspace_root(state)
+    code_domain = is_code_domain(domain, runtime)
+    flow_kind = select_code_flow_kind(workspace_root, runtime) if code_domain else ""
+    return {
+        "domain": domain,
+        "workspace_root": str(workspace_root),
+        "code_flow_kind": flow_kind,
+        "code_project_initialized": flow_kind == "existing_project",
+    }
+
+
+def _is_code_state(state: OrchestratorState) -> bool:
+    runtime = _code_runtime(state)
+    domain = state.get("domain") or classify_domain(state.get("task", ""), "")
+    return is_code_domain(domain, runtime)
+
+
+def _domain_route(state: OrchestratorState) -> str:
+    return "code" if _is_code_state(state) else "non_code"
+
+
+def _opencode_enabled_for_code(state: OrchestratorState) -> bool:
+    return bool(state.get("opencode_enabled", False)) and _is_code_state(state)
+
+
+def _opencode_result_payload(result: AgentRunResult) -> dict[str, Any]:
+    return {
+        "run_id": result.run_id,
+        "agent_id": result.agent_id,
+        "task_id": result.task_id,
+        "status": result.status,
+        "exit_code": result.exit_code,
+        "files_changed": list(result.files_changed),
+        "stdout_path": str(result.stdout_path),
+        "stderr_path": str(result.stderr_path),
+        "events_path": str(result.events_path),
+        "patch_path": str(result.patch_path) if result.patch_path else "",
+        "summary": result.summary,
+    }
+
+
+def _opencode_output(result: AgentRunResult) -> str:
+    files = "\n".join(f"- {path}" for path in result.files_changed) or "- none"
+    patch = str(result.patch_path) if result.patch_path else "none"
+    return (
+        f"OpenCode {result.agent_id} finished with status={result.status}, exit_code={result.exit_code}.\n"
+        f"Summary: {result.summary}\n\n"
+        f"Files changed:\n{files}\n\n"
+        f"Logs:\n- stdout: {result.stdout_path}\n- stderr: {result.stderr_path}\n- events: {result.events_path}\n- patch: {patch}"
+    )
+
+
+def _opencode_meta(result: AgentRunResult) -> dict[str, Any]:
+    return {
+        "agent": result.agent_id,
+        "provider": "opencode",
+        "model": "opencode",
+        "fallback": False,
+        "opencode": _opencode_result_payload(result),
+    }
+
+
+def _opencode_context(state: OrchestratorState, agent_id: str, prompt: str) -> str:
+    runtime = _code_runtime(state)
+    agent_config = agent_runtime_config(runtime, agent_id)
+    return "\n\n".join(
+        part
+        for part in [
+            f"# Synto OpenCode Context: {agent_id}",
+            f"Run ID: {state.get('run_id', '')}",
+            f"Domain: {state.get('domain', '')}",
+            f"Code flow: {state.get('code_flow_kind', '')}",
+            f"Task:\n{state.get('task', '')}",
+            f"Agent runtime config:\n{agent_config}",
+            f"Technology stack:\n{state.get('technology_stack', {})}",
+            f"Spec / plan:\n{state.get('plan', '')}",
+            f"Test plan:\n{state.get('test_plan', '')}",
+            f"Implementation output:\n{state.get('implementation_output', '')}",
+            f"Current prompt:\n{prompt}",
+        ]
+        if str(part).strip()
+    )
+
+
+def _run_opencode_agent(
+    state: OrchestratorState,
+    agent_id: str,
+    task_id: str,
+    prompt: str,
+) -> AgentRunResult:
+    runtime = _code_runtime(state)
+    mode = opencode_mode_for(runtime, agent_id)
+    if mode is None:
+        raise ValueError(f"Agent {agent_id} is not configured for OpenCode execution")
+    binary = opencode_binary(runtime)
+    runner = OpenCodeSessionRunner(opencode_bin=binary) if binary else OpenCodeSessionRunner()
+    spec = AgentExecutionSpec(
+        run_id=state.get("run_id", "") or uuid.uuid4().hex[:12],
+        agent_id=agent_id,
+        task_id=task_id,
+        task_prompt=prompt,
+        workdir=resolve_workspace_root(state),
+        context_markdown=_opencode_context(state, agent_id, prompt),
+        opencode_agent=((runtime.get("opencode", {}) or {}).get("default_agent") or "build"),
+        mode=mode,
+        allowed_paths=allowed_paths_for(runtime, agent_id, mode),
+    )
+    return runner.run(spec)
+
+
+def _record_opencode_result(state: OrchestratorState, agent_id: str, result: AgentRunResult) -> dict[str, Any]:
+    results = dict(state.get("opencode_results", {}) or {})
+    results[agent_id] = _opencode_result_payload(result)
+    return results
 
 
 def _agent_slot_name(state: OrchestratorState, agent_name: str) -> str:
@@ -815,19 +978,37 @@ def _handle_gate(
 def intake(state: OrchestratorState) -> dict[str, Any]:
     state = _with_defaults(state)
     store = _get_state_store(state)
+    domain_meta = _code_domain_metadata(state)
     shared = _update_shared_snapshot(state, "HermesOrchestrator", **{
         "task": state.get("task", ""),
         "project_id": state.get("project_id", "default"),
+        "domain": domain_meta["domain"],
+        "workspace_root": domain_meta["workspace_root"],
+        "code_flow_kind": domain_meta["code_flow_kind"],
+        "code_project_initialized": domain_meta["code_project_initialized"],
         "intake.task": state.get("task", ""),
         "intake.project_id": state.get("project_id", "default"),
+        "intake.domain": domain_meta["domain"],
     })
     completed_phases, pending_phases = _phase_progress(state, "intake", completed=True)
     updates = {
         "current_phase": "intake",
         "completed_phases": completed_phases,
         "pending_phases": pending_phases,
+        "domain": domain_meta["domain"],
+        "workspace_root": domain_meta["workspace_root"],
+        "code_flow_kind": domain_meta["code_flow_kind"],
+        "code_project_initialized": domain_meta["code_project_initialized"],
         "shared_state_snapshot": shared,
-        "events": [_event("intake", "Task normalized and run initialized", run_id=state.get("run_id"))],
+        "events": [
+            _event(
+                "intake",
+                "Task normalized and run initialized",
+                run_id=state.get("run_id"),
+                domain=domain_meta["domain"],
+                code_flow_kind=domain_meta["code_flow_kind"],
+            )
+        ],
     }
     updates.update(_persist_runtime_metadata(state, updates, store))
     return updates
@@ -1012,24 +1193,98 @@ def spec_gate(state: OrchestratorState) -> dict[str, Any]:
 
 def testing(state: OrchestratorState) -> dict[str, Any]:
     state = _with_defaults(state)
+    domain_meta = _code_domain_metadata(state)
+    state = {**state, **domain_meta}
     store = _get_state_store(state)
-    agent_name = _phase_owner(state, "tdd", "Tester")
+    phase_outputs = dict(state.get("phase_outputs", {}))
+
     prompt = (
-        "Create a test-first execution plan covering acceptance criteria, edge cases, integration checks, and rollback considerations.\n\n"
+        "Create the RED test layer before implementation. Write only tests and testing support unless this is the "
+        "project-initialization handoff. Cover acceptance criteria, edge cases, integration checks, and rollback considerations.\n\n"
         f"Task:\n{state.get('task', '')}\n\n"
         f"Spec:\n{state.get('plan', '')}"
     )
+
+    if _opencode_enabled_for_code(state):
+        runtime = _code_runtime(state)
+        flow_kind = state.get("code_flow_kind") or select_code_flow_kind(resolve_workspace_root(state), runtime)
+        ordered = agents_before_or_equal(runtime, flow_kind, "TDDAgent")
+        executable_sequence = [agent for agent in ordered if agent in {"ProjectInitializerAgent", "TDDAgent"}]
+        if "TDDAgent" not in executable_sequence:
+            executable_sequence.append("TDDAgent")
+
+        all_errors: list[str] = []
+        events: list[dict[str, Any]] = []
+        opencode_results = dict(state.get("opencode_results", {}) or {})
+        tdd_output = ""
+
+        for agent_id in executable_sequence:
+            task_id = "project-initialization" if agent_id == "ProjectInitializerAgent" else "tdd"
+            agent_prompt = prompt
+            if agent_id == "ProjectInitializerAgent":
+                agent_prompt = (
+                    "Initialize the project skeleton selected by the prior requirements/stack discussion. "
+                    "Create only the minimal project structure needed so the TDDAgent can add RED tests next.\n\n"
+                    f"Task:\n{state.get('task', '')}\n\nSpec:\n{state.get('plan', '')}"
+                )
+            result = _run_opencode_agent(state, agent_id, task_id, agent_prompt)
+            output = _opencode_output(result)
+            meta = _opencode_meta(result)
+            produced = _write_agent_slot_and_drafts(
+                state,
+                store,
+                phase_id="project_initialization" if agent_id == "ProjectInitializerAgent" else "tdd",
+                agent_name=agent_id,
+                output=output,
+                summary=f"{agent_id} OpenCode result",
+            )
+            phase_key = "project_initialization" if agent_id == "ProjectInitializerAgent" else "tdd"
+            phase_outputs[phase_key] = {"owner": agent_id, "output": output, "draft_artifacts": produced, **meta}
+            opencode_results[agent_id] = _opencode_result_payload(result)
+            state = {**state, "opencode_results": opencode_results}
+            if result.status != "success":
+                all_errors.append(f"{agent_id}: {result.summary}")
+            events.append(_event("opencode_agent", f"{agent_id} OpenCode session completed", phase="tdd", **meta))
+            if agent_id == "TDDAgent":
+                tdd_output = output
+
+        output = tdd_output or "TDDAgent did not produce a test plan."
+        _write_canonical_artifact(store, "test_plan", output, created_by="TDDAgent", summary="OpenCode RED test plan")
+        shared = _update_shared_snapshot(state, "TDDAgent", **{"testing.plan": output, "opencode.results": opencode_results})
+        completed_phases, pending_phases = _phase_progress(state, "tdd", completed=False)
+        updates = {
+            "current_phase": "testing",
+            "completed_phases": completed_phases,
+            "pending_phases": pending_phases,
+            "domain": state.get("domain", ""),
+            "workspace_root": state.get("workspace_root", ""),
+            "code_flow_kind": state.get("code_flow_kind", ""),
+            "code_project_initialized": state.get("code_project_initialized", False),
+            "test_plan": output,
+            "phase_outputs": phase_outputs,
+            "opencode_results": opencode_results,
+            "shared_state_snapshot": shared,
+            "errors": all_errors,
+            "events": events + [_event("testing", "OpenCode RED test phase completed", agent="TDDAgent", provider="opencode")],
+        }
+        updates.update(_persist_runtime_metadata(state, updates, store))
+        return updates
+
+    agent_name = _phase_owner(state, "tdd", "Tester")
     output, meta, errors, agent_skills_cache = _invoke_agent(state, agent_name, prompt, phase_id="tdd")
     produced = _write_agent_slot_and_drafts(state, store, phase_id="tdd", agent_name=agent_name, output=output, summary="Test plan ready")
     _write_canonical_artifact(store, "test_plan", output, created_by=agent_name, summary="Test plan")
     shared = _update_shared_snapshot(state, agent_name, **{"testing.plan": output})
-    phase_outputs = dict(state.get("phase_outputs", {}))
     phase_outputs["tdd"] = {"owner": agent_name, "output": output, "draft_artifacts": produced, **meta}
     completed_phases, pending_phases = _phase_progress(state, "tdd", completed=False)
     updates = {
         "current_phase": "testing",
         "completed_phases": completed_phases,
         "pending_phases": pending_phases,
+        "domain": state.get("domain", ""),
+        "workspace_root": state.get("workspace_root", ""),
+        "code_flow_kind": state.get("code_flow_kind", ""),
+        "code_project_initialized": state.get("code_project_initialized", False),
         "test_plan": output,
         "phase_outputs": phase_outputs,
         "agent_skills_cache": agent_skills_cache,
@@ -1047,12 +1302,15 @@ def testing_gate(state: OrchestratorState) -> dict[str, Any]:
 
 def implementation(state: OrchestratorState) -> dict[str, Any]:
     state = _with_defaults(state)
+    domain_meta = _code_domain_metadata(state)
+    state = {**state, **domain_meta}
     store = _get_state_store(state)
     phase_outputs = dict(state.get("phase_outputs", {}))
     impl_outputs: dict[str, Any] = {}
     all_errors: list[str] = []
     events: list[dict[str, Any]] = []
     agent_skills_cache = dict(state.get("agent_skills_cache", {}))
+    opencode_results = dict(state.get("opencode_results", {}) or {})
 
     prompt = (
         f"Task:\n{state.get('task', '')}\n\n"
@@ -1061,6 +1319,26 @@ def implementation(state: OrchestratorState) -> dict[str, Any]:
     )
 
     for agent_name in _phase_parallel_agents(state, "implementation") or ["BackendImplementer", "FrontendImplementer"]:
+        if _opencode_enabled_for_code(state) and opencode_mode_for(_code_runtime(state), agent_name):
+            result = _run_opencode_agent(state, agent_name, "implementation", prompt)
+            output = _opencode_output(result)
+            meta = _opencode_meta(result)
+            produced = _write_agent_slot_and_drafts(
+                state,
+                store,
+                phase_id="implementation",
+                agent_name=agent_name,
+                output=output,
+                summary=f"{agent_name} OpenCode implementation summary",
+            )
+            impl_outputs[agent_name] = {"output": output, "draft_artifacts": produced, **meta}
+            opencode_results[agent_name] = _opencode_result_payload(result)
+            state = {**state, "opencode_results": opencode_results}
+            if result.status != "success":
+                all_errors.append(f"{agent_name}: {result.summary}")
+            events.append(_event("opencode_agent", f"{agent_name} OpenCode session completed", phase="implementation", **meta))
+            continue
+
         invocation_state = {**state, "agent_skills_cache": agent_skills_cache}
         output, meta, errors, agent_skills_cache = _invoke_agent(invocation_state, agent_name, prompt, phase_id="implementation")
         produced = _write_agent_slot_and_drafts(state, store, phase_id="implementation", agent_name=agent_name, output=output, summary=f"{agent_name} implementation summary")
@@ -1093,6 +1371,7 @@ def implementation(state: OrchestratorState) -> dict[str, Any]:
     shared = _update_shared_snapshot(state, reviewer, **{
         "implementation.agent": "BackendImplementer+FrontendImplementer",
         "implementation.output": combined,
+        "opencode.results": opencode_results,
     })
     phase_outputs["implementation"] = {**impl_outputs, "SystemDesigner": {"output": review_output, **meta}}
     completed_phases, pending_phases = _phase_progress(state, "implementation", completed=True)
@@ -1100,9 +1379,14 @@ def implementation(state: OrchestratorState) -> dict[str, Any]:
         "current_phase": "implementation",
         "completed_phases": completed_phases,
         "pending_phases": pending_phases,
+        "domain": state.get("domain", ""),
+        "workspace_root": state.get("workspace_root", ""),
+        "code_flow_kind": state.get("code_flow_kind", ""),
+        "code_project_initialized": state.get("code_project_initialized", False),
         "implementation_output": combined,
         "phase_outputs": phase_outputs,
         "agent_skills_cache": agent_skills_cache,
+        "opencode_results": opencode_results,
         "shared_state_snapshot": shared,
         "errors": all_errors,
         "events": events,
@@ -1440,7 +1724,11 @@ def build_workflow() -> StateGraph:
 
     graph.set_entry_point("intake")
     graph.add_edge("intake", "memory_rehydration")
-    graph.add_edge("memory_rehydration", "discovery")
+    graph.add_conditional_edges(
+        "memory_rehydration",
+        _domain_route,
+        {"code": "discovery", "non_code": "memory_consolidation"},
+    )
     graph.add_edge("discovery", "discovery_gate")
     graph.add_conditional_edges(
         "discovery_gate",
